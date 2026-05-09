@@ -36,12 +36,18 @@ if "pending_prompt" not in st.session_state:
 # Helpers — Profile display
 # ---------------------------------------------------------------------------
 def format_profile_value(key: str, value) -> str:
-    """Format a raw profile field value for sidebar display.
+    """Format a raw profile field value for sidebar display."""
+    if isinstance(value, list):
+        return ", ".join(format_profile_value(key, v) for v in value) if value else "—"
 
-    TODO: Implement this — values come straight from the LLM extractor
-    and need units + friendly casing before showing to the user.
-    Examples: weight_kg=75 → "75 kg", activity_level="moderately_active" → "Moderate"
-    """
+    if key == "weight_kg":
+        return f"{value} kg"
+    if key == "height_cm":
+        return f"{value} cm"
+    if key == "available_days":
+        return f"{value} days"
+    if isinstance(value, str):
+        return value.replace("_", " ").title()
     return str(value)
 
 

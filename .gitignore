@@ -55,6 +55,10 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
+# Playwright MCP snapshots & validation screenshots
+.playwright-mcp/
+test-*.png
+
 # Claude Code
 CLAUDE.md
 summary.txt
