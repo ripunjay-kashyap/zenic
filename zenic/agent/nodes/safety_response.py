@@ -4,11 +4,14 @@ from zenic.agent.state import ZenicState
 
 def run(state: ZenicState) -> dict:
     reason = state.get("safety_reason", "")
+    intro = (
+        f"I can't help with that — your request involves {reason}."
+        if reason
+        else "I'm not able to help with that request."
+    )
     message = (
-        "I'm not able to help with that request. "
+        f"{intro} "
         "Zenic is designed to support healthy nutrition and fitness goals. "
         "Please consult a qualified healthcare professional for medical advice."
     )
-    if reason:
-        message += f" ({reason})"
     return {"messages": [{"role": "assistant", "content": message}]}

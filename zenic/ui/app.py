@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -7,13 +8,23 @@ load_dotenv()
 from zenic.agent.graph import app as zenic_app
 from zenic.agent.state import ZenicState
 
+
+def _greeting() -> str:
+    """Time-of-day greeting for the hero."""
+    hour = datetime.now().hour
+    if hour < 5:   return "Still up"
+    if hour < 12:  return "Good morning"
+    if hour < 17:  return "Good afternoon"
+    if hour < 22:  return "Good evening"
+    return "Burning the midnight oil"
+
 # ---------------------------------------------------------------------------
 # UI Configuration & Styling
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Zenic", page_icon="🧬", layout="centered")
 
 def load_css(file_name):
-    with open(file_name) as f:
+    with open(file_name, encoding="utf-8") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 css_path = os.path.join(os.path.dirname(__file__), "styles.css")
@@ -55,10 +66,15 @@ def format_profile_value(key: str, value) -> str:
 # Sidebar — Bio-Digital Profile
 # ---------------------------------------------------------------------------
 with st.sidebar:
+    # ── Wordmark ───────────────────────────────────────────────────────────
     st.markdown(
-        "<p style='font-family:Space Mono,monospace;font-size:0.62rem;"
-        "letter-spacing:0.22em;text-transform:uppercase;color:#22c55e;"
-        "margin-bottom:1.25rem;'>// Bio-Data</p>",
+        """
+        <div class="sidebar-mark">
+          <div class="mark-glyph"></div>
+          <span class="mark-text">Zenic</span>
+          <span class="mark-sub">v.1</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
@@ -67,72 +83,69 @@ with st.sidebar:
     completed = [f for f in REQUIRED if profile.get(f)]
     percent = int((len(completed) / len(REQUIRED)) * 100)
 
+    # ── Sync card ──────────────────────────────────────────────────────────
     st.markdown(
         f"""
-        <div style='background:rgba(34,197,94,0.05);border:1px solid rgba(34,197,94,0.18);
-        border-radius:10px;padding:12px 14px;margin-bottom:1.5rem;'>
-            <div style='display:flex;justify-content:space-between;margin-bottom:9px;'>
-                <span style='font-family:Space Mono,monospace;font-size:0.58rem;
-                letter-spacing:0.14em;text-transform:uppercase;color:rgba(221,225,244,0.5);'>
-                PROFILE SYNC</span>
-                <span style='font-family:Space Mono,monospace;font-size:0.65rem;
-                font-weight:700;color:#22c55e;'>{percent}%</span>
+        <div class="sync-card">
+            <div class="sync-row">
+                <span class="sync-label">Bio-Sync</span>
+                <span class="sync-pct">{percent}%</span>
             </div>
-            <div style='width:100%;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;'>
-                <div style='width:{percent}%;height:100%;background:linear-gradient(90deg,#22c55e,#a78bfa);
-                border-radius:2px;box-shadow:0 0 10px rgba(34,197,94,0.4);
-                transition:width 0.5s ease;'></div>
+            <div class="sync-track">
+                <div class="sync-fill" style="width:{percent}%;"></div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # ── Profile fields ─────────────────────────────────────────────────────
     if profile:
+        st.markdown("<span class='sb-label'>Biometrics</span>", unsafe_allow_html=True)
+
         field_icons = {
-            "age": "🎂", "weight_kg": "⚖️", "height_cm": "📏", "gender": "👤",
-            "activity_level": "🏃", "goal": "🎯", "dietary_restrictions": "🥗",
-            "experience_level": "💪", "available_days": "📅", "equipment": "🏋️",
+            "age": "○", "weight_kg": "◐", "height_cm": "◇", "gender": "◈",
+            "activity_level": "◉", "goal": "◎", "dietary_restrictions": "◊",
+            "experience_level": "◆", "available_days": "◧", "equipment": "◩",
         }
         labels = {
             "age": "Age", "weight_kg": "Weight", "height_cm": "Height", "gender": "Gender",
             "activity_level": "Activity", "goal": "Goal", "dietary_restrictions": "Diet",
             "experience_level": "Experience", "available_days": "Schedule", "equipment": "Gym",
         }
+
+        rows_html = []
         for key, icon in field_icons.items():
             val = profile.get(key)
             if val is not None and val != "":
                 display_val = format_profile_value(key, val)
-                st.markdown(
-                    f"""<div style='display:flex;align-items:center;gap:10px;padding:7px 0;
-                    border-bottom:1px solid rgba(255,255,255,0.04);'>
-                        <span style='font-size:1rem;line-height:1;'>{icon}</span>
-                        <div>
-                            <div style='font-family:Space Mono,monospace;font-size:0.5rem;
-                            letter-spacing:0.14em;text-transform:uppercase;
-                            color:rgba(232,237,255,0.34);margin-bottom:1px;'>
-                            {labels.get(key, key.title())}</div>
-                            <div style='font-family:Outfit,sans-serif;font-size:0.84rem;
-                            color:#e8edff;font-weight:400;'>{display_val}</div>
+                rows_html.append(
+                    f"""<div class="field-row">
+                        <span class="field-icon">{icon}</span>
+                        <div class="field-body">
+                            <span class="field-label">{labels.get(key, key.title())}</span>
+                            <span class="field-value">{display_val}</span>
                         </div>
-                    </div>""",
-                    unsafe_allow_html=True,
+                    </div>"""
                 )
+        st.markdown("\n".join(rows_html), unsafe_allow_html=True)
     else:
-        st.caption("Commence chat to build biometric profile.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
         st.markdown(
-            "<p style='font-family:Space Mono,monospace;font-size:0.6rem;"
-            "letter-spacing:0.18em;text-transform:uppercase;color:#22c55e;"
-            "margin-bottom:0.75rem;'>// Vault</p>",
+            """
+            <div class="profile-empty">
+                <span class="glow-pip"></span>
+                Awaiting first signal &mdash; start a conversation to build your biometric profile.
+            </div>
+            """,
             unsafe_allow_html=True,
         )
+
+    # ── PDF vault ──────────────────────────────────────────────────────────
+    if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
+        st.markdown("<span class='sb-label'>Vault</span>", unsafe_allow_html=True)
         with open(st.session_state.pdf_path, "rb") as f:
             st.download_button(
-                "DOWNLOAD PLAN",
+                "Download Plan",
                 f,
                 file_name="zenic_health_plan.pdf",
                 mime="application/pdf",
@@ -180,51 +193,21 @@ def render_metric_cards(results):
 # ---------------------------------------------------------------------------
 # Chat Engine
 # ---------------------------------------------------------------------------
-if not st.session_state.messages:
+if not st.session_state.messages and not st.session_state.pending_prompt:
     # ── Hero Section ──────────────────────────────────────────────────────
     st.markdown(
-        """
-        <div class="hero-wrap">
-
-          <!-- Bio-glyph: dual rotating hexagons + nucleus -->
-          <div class="hero-glyph-ring">
-            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <!-- Outer ring - spins CW -->
-              <g class="glyph-outer">
-                <polygon points="32,4 56,18 56,46 32,60 8,46 8,18"
-                         stroke="#22c55e" stroke-width="0.8" fill="none" opacity="0.55"/>
-                <circle cx="32" cy="4" r="2.5" fill="#22c55e" opacity="0.85"/>
-              </g>
-              <!-- Inner ring - spins CCW -->
-              <g class="glyph-inner">
-                <polygon points="32,14 48,23 48,41 32,50 16,41 16,23"
-                         stroke="#a78bfa" stroke-width="0.6" fill="none" opacity="0.45"/>
-                <circle cx="48" cy="23" r="1.8" fill="#a78bfa" opacity="0.75"/>
-              </g>
-              <!-- Nucleus -->
-              <circle cx="32" cy="32" r="5" fill="rgba(34,197,94,0.12)"
-                      stroke="#22c55e" stroke-width="0.8"/>
-              <circle cx="32" cy="32" r="2.5" fill="#22c55e" opacity="0.9"/>
-            </svg>
+        f"""
+        <div class="hero">
+          <div class="orb-wrap">
+            <div class="orb-glow"></div>
+            <div class="orb"></div>
           </div>
-
-          <!-- Wordmark -->
-          <span class="hero-title">ZENIC</span>
-
-          <!-- Tagline row -->
-          <div class="hero-tagline-row">
-            <div class="hero-tagline-line"></div>
-            <div class="hero-badge">
-              <div class="hero-dot"></div>
-              BIO-INTELLIGENCE ENGINE
-            </div>
-            <div class="hero-tagline-line right"></div>
+          <div class="hero-greeting">
+            {_greeting()}<span class="accent">.</span>
           </div>
-
           <p class="hero-sub">
-            Precision nutrition synthesis &amp; biomolecular analysis — built for the serious athlete.
+            What shall we synthesise today &mdash; nutrition, training, or a precision plan?
           </p>
-
         </div>
         """,
         unsafe_allow_html=True,
@@ -252,7 +235,7 @@ if not st.session_state.messages:
             st.session_state.pending_prompt = prompt_text
             st.rerun()
 
-else:
+elif st.session_state.messages:
     # ── Active Chat Header ─────────────────────────────────────────────────
     st.markdown(
         """
@@ -271,7 +254,7 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-typed_prompt = st.chat_input("Feed the biometric intelligence...")
+typed_prompt = st.chat_input("Ask Zenic — nutrition, training, or a precision plan…")
 
 prompt = typed_prompt or st.session_state.pending_prompt
 if st.session_state.pending_prompt:

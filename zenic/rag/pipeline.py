@@ -207,8 +207,17 @@ def _all_low_quality(chunks: list[dict], threshold: float = 0.3) -> bool:
     return all(c.get("rerank_score", 0.0) < threshold for c in chunks)
 
 
-def generate(query: str, context_chunks: list[dict], intent: str = "") -> str:
-    """Generate a grounded answer with source citations."""
+def generate(
+    query: str,
+    context_chunks: list[dict],
+    intent: str = "",
+    history: list[dict] | None = None,
+) -> str:
+    """Generate a grounded answer with source citations.
+
+    history is an optional list of prior turns ({"role": "user"|"assistant", "content": str}),
+    used only by the general_chat branch so the model can reference earlier context.
+    """
 
     # --- Calculate intent: present pre-computed deterministic results ---
     if intent == "calculate":
@@ -244,10 +253,11 @@ def generate(query: str, context_chunks: list[dict], intent: str = "") -> str:
             "Never provide medical diagnoses and never recommend supplement dosages above established Upper Intake Levels. "
             "Keep your answers concise and practical."
         )
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
-        ]
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history[-6:])
+        if not messages or messages[-1].get("content") != query:
+            messages.append({"role": "user", "content": query})
     else:
         # --- RAG intents: strict Clinical Data Retrieval ---
         context_text = "\n\n".join(
