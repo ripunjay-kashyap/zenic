@@ -21,7 +21,12 @@ def _greeting() -> str:
 # ---------------------------------------------------------------------------
 # UI Configuration & Styling
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="Zenic", page_icon="🧬", layout="centered")
+st.set_page_config(
+    page_title="Zenic",
+    page_icon="🧬",
+    layout="centered",
+    initial_sidebar_state="expanded",
+)
 
 def load_css(file_name):
     with open(file_name, encoding="utf-8") as f:
