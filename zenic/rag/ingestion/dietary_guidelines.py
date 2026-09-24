@@ -13,13 +13,17 @@ import hashlib
 import re
 from pathlib import Path
 
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def _extract_pdf_text(pdf_path: str) -> str:
     """Extract full text from a PDF using pypdf."""
     try:
         from pypdf import PdfReader
-    except ImportError:
-        raise ImportError("Install pypdf: pip install pypdf")
+    except ImportError as exc:
+        raise ImportError("Install pypdf: pip install pypdf") from exc
 
     reader = PdfReader(pdf_path)
     pages = []
@@ -34,37 +38,10 @@ def _recursive_split(text: str, chunk_size: int = 3000, overlap: int = 500) -> l
     Recursive text splitter. Tries to split on paragraph breaks first,
     then sentence breaks, then character boundaries.
     """
-    if len(text) <= chunk_size:
-        return [text.strip()] if text.strip() else []
+    from zenic.rag.ingestion.issn import _split_section
 
-    separators = ["\n\n", "\n", ". ", " ", ""]
-    for sep in separators:
-        if sep and sep in text:
-            parts = text.split(sep)
-            chunks = []
-            current = ""
-            for part in parts:
-                candidate = (current + sep + part).lstrip() if current else part
-                if len(candidate) <= chunk_size:
-                    current = candidate
-                else:
-                    if current:
-                        chunks.append(current.strip())
-                    # Carry overlap from end of previous chunk
-                    overlap_text = current[-overlap:] if len(current) > overlap else current
-                    current = (overlap_text + sep + part).lstrip()
-            if current:
-                chunks.append(current.strip())
-            # If we actually split into more than one chunk, return
-            if len(chunks) > 1:
-                return [c for c in chunks if len(c) > 50]
-
-    # Last resort: hard character split
-    return [
-        text[i : i + chunk_size].strip()
-        for i in range(0, len(text), chunk_size - overlap)
-        if text[i : i + chunk_size].strip()
-    ]
+    # Sentence-aware windows always advance, cap size, and preserve overlap.
+    return _split_section(text, chunk_size=chunk_size, overlap=overlap)
 
 
 def ingest_pdf(
@@ -84,7 +61,7 @@ def ingest_pdf(
         chunk_size: target chars per chunk (~600 tokens at ~5 chars/token)
         overlap: overlap chars between adjacent chunks
     """
-    print(f"Extracting text from: {Path(pdf_path).name}")
+    logger.info(f"Extracting text from: {Path(pdf_path).name}")
     text = _extract_pdf_text(pdf_path)
 
     # Clean up common PDF extraction artefacts
@@ -92,9 +69,9 @@ def ingest_pdf(
     text = re.sub(r"\n{3,}", "\n\n", text)   # excess blank lines
     text = re.sub(r"[ \t]{2,}", " ", text)   # excess whitespace
 
-    print(f"  Extracted {len(text)} chars — splitting...")
+    logger.info(f"  Extracted {len(text)} chars — splitting...")
     raw_chunks = _recursive_split(text, chunk_size=chunk_size, overlap=overlap)
-    print(f"  {len(raw_chunks)} chunks")
+    logger.info(f"  {len(raw_chunks)} chunks")
 
     docs = []
     for i, chunk_text in enumerate(raw_chunks):
@@ -124,7 +101,7 @@ def ingest_dietary_guidelines(pdf_dir: str) -> list[dict]:
     pdf_dir_path = Path(pdf_dir)
     pdfs = list(pdf_dir_path.glob("*.pdf"))
     if not pdfs:
-        print(f"No PDFs found in {pdf_dir}")
+        logger.info(f"No PDFs found in {pdf_dir}")
         return []
 
     all_docs = []
@@ -133,5 +110,5 @@ def ingest_dietary_guidelines(pdf_dir: str) -> list[dict]:
         docs = ingest_pdf(str(pdf), source_name=source_name)
         all_docs.extend(docs)
 
-    print(f"Total dietary guidelines documents: {len(all_docs)}")
+    logger.info(f"Total dietary guidelines documents: {len(all_docs)}")
     return all_docs

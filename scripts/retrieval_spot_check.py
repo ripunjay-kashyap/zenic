@@ -4,6 +4,7 @@ Use --save and --compare flags to A/B test retrieval changes.
 """
 import argparse
 import json
+
 from zenic.rag.pipeline import generate_multi_queries, hybrid_search, rerank
 
 
@@ -16,21 +17,21 @@ def spot_check(query: str, verbose: bool = True) -> dict:
         print(f"    - {v}")
 
     candidates = hybrid_search(variants, top_k=20)
-    print(f"\n[2] HYBRID SEARCH — TOP 20:")
+    print("\n[2] HYBRID SEARCH — TOP 20:")
     for i, c in enumerate(candidates, 1):
         snippet = c["text"][:120].replace("\n", " ")
         print(f"  {i:>2}. [vec={c.get('vector_score', 0):.3f} bm25={c.get('bm25_score', 0):.3f}] "
               f"src={c['metadata'].get('source')} :: {snippet}...")
 
     reranked = rerank(query, candidates, top_k=7)
-    print(f"\n[3] AFTER RERANK — TOP 7:")
+    print("\n[3] AFTER RERANK — TOP 7:")
     for i, c in enumerate(reranked, 1):
         snippet = c["text"][:120].replace("\n", " ")
         print(f"  {i}. [rerank={c.get('rerank_score', 0):.3f}] "
               f"src={c['metadata'].get('source')} :: {snippet}...")
 
     if verbose:
-        print(f"\n[4] FULL TEXT — TOP 3:")
+        print("\n[4] FULL TEXT — TOP 3:")
         for i, c in enumerate(reranked[:3], 1):
             print(f"\n--- Chunk {i} ---\nMetadata: {c['metadata']}\n{c['text']}")
 
@@ -43,7 +44,7 @@ def main():
     parser.add_argument("--compare", help="Compare against a previously saved baseline JSON")
     args = parser.parse_args()
 
-    with open("eval_data/pillar1_spot_check.json") as f:
+    with open("eval_data/pillar1_spot_check.json", encoding="utf-8") as f:
         cases = json.load(f)
 
     results = []
@@ -53,15 +54,15 @@ def main():
         input("\n[Press Enter for next query...]")
 
     if args.save:
-        with open(args.save, "w") as f:
+        with open(args.save, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2)
         print(f"\nSaved to {args.save}")
 
     if args.compare:
-        with open(args.compare) as f:
+        with open(args.compare, encoding="utf-8") as f:
             baseline = json.load(f)
         print("\n=== COMPARISON vs BASELINE ===")
-        for new, old in zip(results, baseline):
+        for new, old in zip(results, baseline, strict=False):
             new_sources = [c["metadata"].get("source") for c in new["top3"]]
             old_sources = [c["metadata"].get("source") for c in old["top3"]]
             if new_sources != old_sources:

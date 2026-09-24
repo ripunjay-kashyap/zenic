@@ -3,8 +3,9 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-from zenic.agent.nodes.router import run as router_run
 from langchain_core.messages import HumanMessage
+
+from zenic.agent.nodes.router import run as router_run
 
 _CASES = [
     ("How much protein is in chicken breast?",        "nutrition_qa"),

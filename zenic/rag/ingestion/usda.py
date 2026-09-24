@@ -13,10 +13,13 @@ Metadata: category, food_group, source="USDA", fdcId, data_type
 import json
 import os
 import time
-import hashlib
 from pathlib import Path
 
 import httpx
+
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 _BASE = "https://api.nal.usda.gov/fdc/v1"
 
@@ -127,7 +130,7 @@ def ingest_usda_bulk(json_path: str) -> list[dict]:
     Recommended: FoundationDownload.zip or FoodData_Central_sr_legacy_food_json_YYYY-MM-DD.zip
     """
     path = Path(json_path)
-    print(f"Loading USDA bulk file: {path.name} ({path.stat().st_size / 1e6:.1f} MB)...")
+    logger.info(f"Loading USDA bulk file: {path.name} ({path.stat().st_size / 1e6:.1f} MB)...")
 
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -141,10 +144,10 @@ def ingest_usda_bulk(json_path: str) -> list[dict]:
     if not foods and isinstance(data, list):
         foods = data
 
-    print(f"  {len(foods)} foods in bulk file")
+    logger.info(f"  {len(foods)} foods in bulk file")
     docs = [_format_food_doc(f) for f in foods]
     docs = [d for d in docs if d is not None]
-    print(f"  {len(docs)} documents prepared")
+    logger.info(f"  {len(docs)} documents prepared")
     return docs
 
 
@@ -165,7 +168,7 @@ def ingest_usda_api(n: int = 3000, data_types: list[str] | None = None) -> list[
     page = 1
     page_size = 200
 
-    print(f"Fetching top {n} USDA foods via API (data types: {data_types})...")
+    logger.info(f"Fetching top {n} USDA foods via API (data types: {data_types})...")
 
     with httpx.Client(timeout=30) as client:
         while len(docs) < n:
@@ -179,7 +182,7 @@ def ingest_usda_api(n: int = 3000, data_types: list[str] | None = None) -> list[
                 },
             )
             if resp.status_code == 429:
-                print("  Rate limited — waiting 5s...")
+                logger.info("  Rate limited — waiting 5s...")
                 time.sleep(5)
                 continue
             resp.raise_for_status()
@@ -190,12 +193,12 @@ def ingest_usda_api(n: int = 3000, data_types: list[str] | None = None) -> list[
             batch_docs = [_format_food_doc(f) for f in foods]
             batch_docs = [d for d in batch_docs if d is not None]
             docs.extend(batch_docs)
-            print(f"  Page {page}: fetched {len(batch_docs)} docs (total: {len(docs)})")
+            logger.info(f"  Page {page}: fetched {len(batch_docs)} docs (total: {len(docs)})")
             page += 1
 
             if len(foods) < page_size:
                 break  # last page
 
     docs = docs[:n]
-    print(f"Prepared {len(docs)} USDA food documents")
+    logger.info(f"Prepared {len(docs)} USDA food documents")
     return docs

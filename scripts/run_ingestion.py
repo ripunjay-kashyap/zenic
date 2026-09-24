@@ -15,9 +15,11 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Add project root to path
@@ -109,8 +111,18 @@ def save_bm25_corpus(corpus: list[dict], merge: bool = True) -> None:
             existing_by_id[doc["id"]] = doc  # new doc wins on collision
         slim = list(existing_by_id.values())
 
-    with open(_BM25_CORPUS_PATH, "w", encoding="utf-8") as f:
-        json.dump(slim, f)
+    target = Path(_BM25_CORPUS_PATH)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=target.parent, delete=False) as f:
+            temporary = Path(f.name)
+            json.dump(slim, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     print(f"BM25 corpus saved: {_BM25_CORPUS_PATH} ({len(slim)} total docs)")
 
 

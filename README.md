@@ -1,246 +1,178 @@
-# Zenic — AI Health & Nutrition Assistant
-
-A production-grade AI assistant for health, nutrition, and fitness — built across three engineering pillars: advanced RAG retrieval, agentic orchestration, and automated LLM evaluation.
-
+---
+title: Zenic
+emoji: 🥗
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
 ---
 
-## What It Does
+# Zenic — Health & Nutrition RAG Assistant
 
-Zenic answers natural language questions about nutrition and exercise using a locally indexed knowledge base, then routes each query through a multi-node LangGraph agent to determine the right response type: a factual answer, a macro calculation, a downloadable meal/workout plan, or a weekly health summary.
+An evidence-focused nutrition and fitness assistant built with Python, LangGraph,
+Streamlit, hybrid retrieval, and Groq. It combines a curated knowledge base with
+deterministic calculators and downloadable educational plans.
 
-![Zenic UI](assets/ui_landing.png)
+![Zenic interface](assets/ui_landing.png)
 
-**Example interactions:**
-- *"What does the ISSN recommend for protein intake for athletes?"* → RAG answer citing source + year
-- *"Calculate my TDEE — I'm 28, 75kg, 178cm, moderately active"* → deterministic math, no LLM
-- *"Give me a 7-day meal plan for muscle gain"* → structured plan + downloadable PDF
-- *"What are the best barbell exercises for hypertrophy?"* → exercise retrieval from wger
-- *"How has my calorie intake trended this week?"* → weekly summary with insights
+**Validation:** the offline suite, live Qdrant/Groq workflows, and container checks
+are recorded in [the release audit](docs/release-audit.md). This is an educational
+portfolio application, not a medical device or a service for clinical decisions.
 
----
+## Architecture
 
-## Architecture — Three Pillars
-
-### Pillar 1 — Advanced RAG (`zenic/rag/`)
-
-Multi-stage retrieval pipeline over a 10,201-chunk knowledge base:
-
-```
-query → multi-query expansion (Groq, 3 variants)
-      → hybrid search (ChromaDB vector + BM25Okapi)
-      → per-source diversity cap (max 12 per source)
-      → cross-encoder reranking (BAAI/bge-reranker-base)
-      → live USDA API fallback (when top rerank score < 0.5)
-      → generate (Groq Llama 3.3 70B, strict Librarian prompt)
-```
-
-**Key design choices:**
-- True hybrid injection: BM25 candidates not in vector results are injected before reranking, preventing terse structured documents (USDA nutrient tables) from being excluded
-- Per-source cap prevents NIH ODS (6k+ chunks) from crowding out smaller sources pre-rerank
-- RAG-first rule enforced by `rag_vs_api_check.py` — live APIs are fallback only
-
-**Knowledge base — 10,201 chunks:**
-
-| Source | Chunks | Chunking strategy |
-|--------|--------|-------------------|
-| NIH ODS fact sheets | 6,033 | One chunk per supplement section |
-| USDA FoodData Central | 3,000 | One chunk per food item |
-| wger exercise database | 897 | One chunk per exercise |
-| Dietary Guidelines 2020–25 | 143 | Recursive split, 500–800 tokens |
-| ISSN position papers | 148 | Section-aware with metadata prefix |
-| Synthetic patches | 3 | Hand-crafted for known retrieval gaps |
-
-### Pillar 2 — Agentic Orchestration (`zenic/agent/`)
-
-A LangGraph `StateGraph` routing 6 intent classes through typed nodes:
-
-```
-safety_check → router → profile_check → [intent-specific path] → generate/pdf
+```mermaid
+flowchart LR
+    UI[Streamlit session] --> Safety[Input bounds and safety filter]
+    Safety --> Router[Intent router]
+    Router --> RAG[Nutrition and exercise Q&A]
+    RAG --> Expand[Query expansion]
+    Expand --> Hybrid[Vector search + BM25]
+    Hybrid --> Rank[Cross encoder reranking]
+    Rank --> Evidence[Evidence threshold and context budget]
+    Evidence --> Answer[Cited answer or abstention]
+    Router --> Profile[Validated profile]
+    Profile --> Calc[Deterministic calculations]
+    Profile --> Plans[Food or exercise retrieval]
+    Calc --> Plans
+    Plans --> PDF[Plan composition and PDF]
+    Router --> Demo[Synthetic weekly summary]
 ```
 
-| Intent | Node sequence |
-|--------|--------------|
-| `nutrition_qa` | safety → router → rag_retrieval → generate |
-| `calculate` | safety → router → profile_check → calculator → generate |
-| `meal_plan` | safety → router → profile_check → food_retrieval → plan_compose → pdf_generate |
-| `workout_plan` | safety → router → profile_check → exercise_retrieval → plan_compose → pdf_generate |
-| `weekly_summary` | safety → router → data_ingestion → trend_analysis → insight_generation → pdf_generate |
-| `general_chat` | safety → router → generate |
+- **Knowledge:** 10,201 bundled passages from NIH ODS, USDA, wger, dietary
+  guidelines, and ISSN. Three manually authored summaries are explicitly marked
+  in their metadata; their provenance scripts remain in `scripts/oneoff/`.
+- **Retrieval:** BGE-small embeddings, local Chroma or production Qdrant, BM25,
+  reciprocal rank fusion, fair candidate allocation per source, deduplication by chunk identity, and BGE cross encoder
+  reranking. Query embeddings are batched; models and clients are reused.
+- **Grounding:** only passages scoring at least 0.5 enter factual generation.
+  Whole passages fit within a 16,000-character budget. Missing evidence produces
+  a static abstention. Live USDA fallback results are reranked too.
+- **Citations:** evidence IDs such as `[1]` map to supplied source records.
+  Missing or out-of-range IDs cause abstention. This checks citation structure,
+  not whether every claim is semantically entailed by its cited passage.
+- **Orchestration:** six intents: nutrition Q&A, calculations, meal plans,
+  workout plans, demonstration weekly summaries, and general conversation.
+  Unknown router outputs require retrieval rather than unrestricted health chat.
+- **Calculations:** Mifflin–St Jeor BMR, activity-based TDEE, macro splits, and
+  protein ranges. Numeric results are deterministic; their prose presentation
+  uses the model. Adult-only equation use and explicit physiology coefficients
+  prevent silently applying an inappropriate formula.
+- **Resilience:** timeouts, bounded retries, safe errors, structured logs with
+  correlation IDs, and no health query or profile values in application logs.
 
-Every node is a pure function on `ZenicState` (TypedDict). Math nodes (`calculator`, `trend_analysis`) are fully deterministic — no LLM involved.
+The candidate merge uses reciprocal rank fusion so raw BM25 scores cannot overwhelm
+vector similarities. Each source receives a share of the candidate budget before
+unused slots are filled by rank; the cross encoder makes the final relevance judgment.
 
-**Safety system — three layers:**
-- Layer 1: regex keyword classifier (pre-LLM, zero latency)
-- Layer 2: live OpenFDA adverse event lookup (cached)
-- Layer 3: system prompt constraints in `generate()`
+## Run locally
 
-### Pillar 3 — Evaluation (`tests/`, `scripts/ragas_eval.py`)
-
-Automated and manual evaluation suite:
-
-| Test type | Coverage | Result |
-|-----------|----------|--------|
-| Unit tests (no API) | BMR/TDEE math, profile logic, safety classifier | 33/33 PASS |
-| Integration tests | Router intent classification (12 cases, 6 classes) | 12/12 PASS |
-| Node-sequence tests | LangGraph workflow correctness for all 8 paths | 8/8 PASS |
-| RAGAS faithfulness | LLM-as-judge grounding eval (Gemma 4 31B) | **0.937** ✅ (target >0.85) |
-| RAGAS context precision | Retrieval relevance (Gemma 4 31B) | **0.911** ✅ (target >0.75) |
-| RAG vs API boundary | 6 cases, RAG-first rule enforcement | 6/6 PASS |
-
----
-
-## Evaluation Results
-
-**Faithfulness** measures whether every claim in the generated answer is grounded in the retrieved context chunks — a score of 1.0 means no hallucination at all. **Context precision** measures how many of the retrieved chunks were actually relevant to the question — higher scores mean the pipeline surfaces the right documents, not just any documents.
-
-Latest scores (6 cases, `--no-multi-query`, judge: Gemma 4 31B IT, 2026-04-21):
-
-| Case | Faithfulness | Context Precision | Notes |
-|------|-------------|------------------|-------|
-| p1_003 | 1.000 | 0.587 | NIH ODS retrieval noise — answer correct, adjacent vitamin D chunks ranked alongside the UL chunk |
-| p1_004 | 1.000 | 1.000 | |
-| p1_006 | 1.000 | 1.000 | |
-| p1_007 | 0.800 | 0.877 | Improved from 0.667/0.593 after top_k tuning (9→7) |
-| p1_009 | 0.964 | 1.000 | |
-| p1_011 | 0.857 | 1.000 | |
-| **Average** | **0.937** ✅ | **0.911** ✅ | Both targets met (>0.85 / >0.75) |
-
-**Skipped cases:**
-
-**USDA data gap** (`p1_001`, `p1_002`, `p1_010`): The 3k-chunk USDA subset is skewed toward processed foods — plain chicken breast, raw spinach, and banana are not indexed. For these queries the system correctly triggers the live USDA API fallback, validated separately by `rag_vs_api_check.py` (6/6 PASS). The RAGAS eval script calls the retrieval pipeline directly and doesn't run the full LangGraph agent, so the API fallback path is outside its scope.
-
-**Single-query retrieval gap** (`p1_005`): "What are good compound exercises for back using a barbell" requires multi-query expansion to surface the wger Barbell Row chunk — single-query retrieves leg/shoulder exercises instead. Scores correctly with multi-query enabled.
-
-**Judge parsing bug** (`p1_008`): Retrieval score is 0.999 and the generated answer is word-for-word from chunk 1, yet Gemma 4 assigns 0.000 faithfulness. The calcium nutrient table structure confuses the judge's JSON parser — a known LLM-as-judge limitation.
-
-**Out-of-scope trick question** (`p1_012`): "What color is the vitamin D molecule" — the corpus has vitamin D nutrition data but nothing about molecular color. The LLM answers from parametric knowledge instead of refusing. Needs a pre-generation relevance guard (check reranker scores before calling the LLM); tracked as future work.
-
-**Scope note:** This eval measures RAG retrieval quality in isolation. A future agent-level eval would run the full LangGraph pipeline and extract contexts from `ZenicState` — covering both the RAG path and the API fallback — giving end-to-end faithfulness scores closer to what users actually experience.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| LLM | Groq — Llama 3.3 70B Versatile |
-| Embeddings | `BAAI/bge-small-en-v1.5` (SentenceTransformers) |
-| Reranker | `BAAI/bge-reranker-base` (CrossEncoder) |
-| BM25 | `rank_bm25` (BM25Okapi) |
-| Vector store (dev) | ChromaDB |
-| Vector store (prod) | Qdrant Cloud |
-| Agent framework | LangGraph (StateGraph) |
-| UI | Streamlit |
-| PDF generation | FPDF2 |
-| Evaluation | RAGAS + LangChain Google GenAI |
-| Judge LLM | Gemma 4 31B IT (Google AI) |
-| Deployment | HF Spaces (Docker runtime, 16 GiB RAM) |
-| Container | Podman |
-
----
-
-## Project Structure
-
-```
-zenic/
-├── rag/
-│   ├── pipeline.py          # Full retrieval pipeline (retrieve, generate, hybrid_search, rerank)
-│   ├── vector_store.py      # ChromaDB ↔ Qdrant adapter (ENV-based toggle)
-│   └── ingestion/           # Per-source ingest scripts (usda, nih, issn, wger, dietary_guidelines)
-├── agent/
-│   ├── state.py             # ZenicState TypedDict
-│   ├── graph.py             # LangGraph assembly + routing logic
-│   ├── nodes/               # Pure node functions (safety_check, router, calculator, pdf_generate …)
-│   ├── tools/               # calculations.py (deterministic math), usda_api.py, wger_api.py
-│   └── trace.py             # Node-visit recorder for integration tests
-├── safety/
-│   ├── layer1_classifier.py # Regex keyword filter
-│   └── layer2_openfda.py    # OpenFDA adverse event lookup
-└── ui/
-    ├── app.py               # Streamlit chat interface
-    └── styles.css           # Custom CSS (dark theme, metric cards, hero section)
-
-tests/
-├── pillar2/                 # test_calculations, test_profile_check, test_router
-└── pillar3/                 # test_safety, test_node_sequence
-
-scripts/
-├── ragas_eval.py            # Automated RAGAS evaluation
-├── faithfulness_spot_check.py
-├── rag_vs_api_check.py      # RAG-first boundary verification
-├── debug_reranker.py        # Reranker diagnostics (zero LLM calls)
-├── check_groq_limit.py      # Pre-run Groq health check
-├── check_gemini_limit.py    # Pre-run Gemini health check
-└── migrate_to_qdrant.py     # One-time corpus migration to Qdrant Cloud
-
-eval_data/
-└── pillar1_spot_check.json  # 12 hand-crafted evaluation cases
-
-.streamlit/
-└── config.toml              # Streamlit theme (dark green palette)
-```
-
----
-
-## Setup
+Use **Python 3.12**. The checked lock and container target Linux CPU execution.
 
 ```bash
-# Clone and install
-git clone https://github.com/YOUR_USERNAME/zenic.git
-cd zenic
-pip install -r requirements.txt
-
-# Configure environment
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+pip install -r requirements.lock.txt
+pip check
 cp .env.example .env
-# Fill in: GROQ_API_KEY, GOOGLE_API_KEY, USDA_API_KEY
-# For production: QDRANT_URL, QDRANT_API_KEY, ENV=production
-
-# Run the app (local dev — uses ChromaDB)
-streamlit run zenic/ui/app.py
-
-# Run tests (no API keys needed)
-pytest -v -m "not integration"
-
-# Run RAGAS evaluation (~25k Groq tokens)
-python scripts/check_groq_limit.py
-python scripts/check_gemini_limit.py
-PYTHONPATH=. python scripts/ragas_eval.py --no-multi-query
 ```
 
-**Required API keys:**
-| Key | Used for |
-|-----|---------|
-| `GROQ_API_KEY` | All LLM calls (generation + multi-query expansion) |
-| `GOOGLE_API_KEY` | RAGAS judge (Gemma 4 31B IT) |
-| `USDA_API_KEY` | Live food data fallback |
-| `QDRANT_URL` + `QDRANT_API_KEY` | Production vector store |
+Set `GROQ_API_KEY` and `ENV=development`. The default model is
+`openai/gpt-oss-20b`; structured plans use `openai/gpt-oss-120b`, which handled
+the nested plan schema more reliably in live validation. Set `GROQ_MODEL` and
+`GROQ_PLAN_MODEL` to choose available alternatives. Plan output is validated
+locally; supported models also use constrained JSON schemas. Exported environment
+variables take precedence over `.env`.
 
----
-
-## Deployment (HF Spaces + Podman)
+The BM25 corpus ships with the repository, but the vector database does not.
+Build a local vector index from the same corpus before starting:
 
 ```bash
-# Build image (pre-bakes embedding models for fast cold start)
-podman build -t zenic .
-
-# Smoke test locally
-podman run -p 8501:8501 --env-file .env zenic
-
-# One-time Qdrant Cloud migration
-PYTHONPATH=. python scripts/migrate_to_qdrant.py
-
-# Push to HF Spaces
-podman tag zenic registry.hf.co/USERNAME/zenic:latest
-podman push registry.hf.co/USERNAME/zenic:latest
+ENV=development PYTHONPATH=. python scripts/index_corpus.py
+PYTHONPATH=. python scripts/healthcheck.py --llm
+streamlit run zenic/ui/app.py
 ```
 
-Set HF Spaces secrets: `GROQ_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`, `USDA_API_KEY`, `GOOGLE_API_KEY`, `ENV=production`
+Embedding and reranking models download on first use. CPU reranking can take tens
+of seconds. `MULTI_QUERY_ENABLED=false` avoids query-expansion model calls when
+latency or provider budget matters. It can reduce recall.
 
----
+## Configuration
 
-## Key Design Rules
+See [.env.example](.env.example) for all defaults and supported tuning knobs.
 
-- **RAG-first, API-fallback**: local vector DB always queried first; USDA/wger live APIs called only when rerank score < 0.5
-- **Deterministic math, RAG for knowledge**: BMR, TDEE, macro splits are pure Python functions — never delegated to the LLM
-- **Source citations non-negotiable**: every generated answer must cite source name and year inline
-- **Strict Librarian prompt**: LLM is explicitly forbidden from adding knowledge not present in retrieved chunks
+| Variable | Purpose |
+| --- | --- |
+| `GROQ_API_KEY` | Required for routing and generation |
+| `GROQ_MODEL`, `GROQ_PLAN_MODEL` | Chat/routing model and structured-plan model |
+| `ENV` | `development` uses Chroma; `production` uses Qdrant |
+| `QDRANT_URL`, `QDRANT_API_KEY` | Required in production; HTTPS only |
+| `USDA_API_KEY` | Optional food-data fallback |
+| `GOOGLE_API_KEY` | Optional historical RAGAS evaluation |
+| `CHROMA_PATH`, `BM25_CORPUS_PATH` | Local persistence locations |
+| `MULTI_QUERY_ENABLED` | Enable query expansion, default true |
+| `RETRIEVAL_TOP_K` | Final passages, default 7 |
+| `RERANK_BATCH_SIZE` | Small length-sorted batches, default 4 |
+| `LOG_FORMAT`, `LOG_LEVEL` | Structured or text diagnostics |
+
+The UI keeps chat and profile state per Streamlit session. Prompts and relevant
+profile fields are sent to the configured model provider; food fallback queries
+are sent to USDA. Do not enter identifying or sensitive medical information.
+Weekly summaries use bundled **synthetic demonstration data**, not user tracking.
+
+## Tests and evaluation
+
+```bash
+ruff check .
+pytest -m 'not integration' -q
+pytest -m 'integration' -q  # configured providers and populated index required
+PYTHONPATH=. python scripts/retrieval_spot_check.py
+PYTHONPATH=. python scripts/ragas_eval.py
+```
+
+Offline tests cover retrieval merging, reranking, grounding, citation rejection,
+configuration, HTTP failure handling, profiles, calculators, graph routing, PDF
+rendering, and safety boundaries. They replace external services; they do not
+establish live service health or clinical accuracy.
+
+`eval_results/ragas_latest.json` contains a **historical** evaluation using the
+previous model and prompts. It is retained for reproducibility, not advertised
+as a score for the current version. The small retrieval benchmark is also not a
+clinical validation dataset.
+
+## Deployment
+
+```bash
+# Index the same bundled corpus in an existing configured Qdrant collection.
+ENV=production PYTHONPATH=. python scripts/index_corpus.py
+ENV=production PYTHONPATH=. python scripts/healthcheck.py --llm
+
+docker build -t zenic .
+docker run --rm --env-file .env -p 7860:7860 zenic
+```
+
+The image runs as a non-root user, excludes local secrets and raw documents,
+installs pinned dependencies, and preloads embedding models. Its HTTP healthcheck
+checks Streamlit liveness; `scripts/healthcheck.py --llm` checks service readiness.
+The same Dockerfile supports Hugging Face Docker Spaces on port 7860.
+
+**Before internet exposure:** deploy behind authenticated access with request and
+concurrency limits, TLS, provider spending limits, and a retention policy. This
+repository does not implement account authentication or a distributed rate limiter.
+Keep Streamlit's default CORS and XSRF protections enabled. Do not expose a Chroma
+server; the development backend uses an embedded database only.
+
+## Repository map
+
+- `zenic/rag/`: retrieval, generation, vector adapters, and ingestion
+- `zenic/agent/`: graph, nodes, profile validation, and deterministic tools
+- `zenic/safety/`: keyword filter and standalone OpenFDA research utility
+- `zenic/ui/`: Streamlit interface
+- `tests/`: offline regression and opt-in live integration checks
+- `scripts/`: corpus indexing, ingestion, migration, health and evaluation tools
+- `data/`: curated corpus and synthetic demonstration data
+- `docs/release-audit.md`: validation evidence and remaining release blockers
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

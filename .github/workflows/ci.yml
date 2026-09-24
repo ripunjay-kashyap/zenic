@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, ship-hf-spaces]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The unit suite must run with no credentials and no network access.
+  ENV: development
+  LOG_FORMAT: text
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff
+      - name: Lint
+        run: ruff check .
+      # `ruff format --check` is deliberately not a gate yet: adopting it would
+      # rewrite ~74 existing files in one pass, including the deliberately
+      # column-aligned node tables in graph.py. Run `ruff format` as its own
+      # dedicated commit when the team is ready, then enable this step.
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install CPU-only torch
+        run: pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r requirements.lock.txt
+      - run: pip check
+
+      - name: Run tests
+        # Integration tests need live API keys and are excluded from CI.
+        run: pytest -m "not integration" --cov --cov-report=term-missing
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan history for committed credentials
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

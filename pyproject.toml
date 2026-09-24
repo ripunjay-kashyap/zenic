@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zenic"
+version = "1.0.0"
+description = "Health and nutrition AI assistant: advanced RAG, agentic orchestration, and evaluation."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+
+[tool.setuptools.packages.find]
+include = ["zenic*"]
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+# Restricted to tests/ so that the one-off probe scripts under scripts/ — which
+# are named test_*.py but are not tests — are never collected.
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: requires live API keys (Groq, USDA, Qdrant)",
+    "slow: slow to run",
+]
+filterwarnings = [
+    "error::DeprecationWarning:zenic.*",
+]
+
+[tool.coverage.run]
+source = ["zenic"]
+omit = ["zenic/ui/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+# ---------------------------------------------------------------------------
+# Lint / format
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["scripts/test_*.py", "scripts/debug_*.py", ".venv"]
+
+[tool.ruff.lint]
+# Preview is on solely for PLW1514 (unspecified-encoding). Reading the ISSN
+# paper metadata without an explicit encoding corrupted the citation prefix of
+# 44 corpus chunks ("Jäger" → "JÃ¤ger"); this rule makes that unrepeatable.
+preview = true
+explicit-preview-rules = true
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "T20",  # no print() in library code
+    "RUF",
+    "PLW1514",  # open() without an explicit encoding
+]
+ignore = [
+    "E501",   # line length is enforced by the formatter, not the linter
+    "B008",   # function call in default argument — used deliberately by FastAPI-style code
+    "SIM108", # ternary rewrites hurt readability in the branchy render helpers
+    # Prose in docstrings and user-facing strings uses typographic dashes and
+    # arrows on purpose; these rules flag every one of them.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# One-off dev/probe scripts: printing is their output, and several must set
+# environment variables before importing zenic, so imports cannot come first.
+"scripts/*" = ["T20", "E402", "SIM115"]
+"zenic/ui/*" = ["E402"]  # st.set_page_config must run before the agent imports
+"tests/*" = ["T20", "E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["zenic"]

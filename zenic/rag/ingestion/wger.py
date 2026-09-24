@@ -9,7 +9,12 @@ Metadata: muscle_group, muscles_secondary, equipment, category, source="wger"
 """
 import re
 import time
+
 import httpx
+
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 _BASE = "https://wger.de/api/v2"
 _LANGUAGE_ENGLISH = 2
@@ -29,14 +34,14 @@ def fetch_exercises(page_size: int = _PAGE_SIZE) -> list[dict]:
         while url:
             resp = client.get(url)
             if resp.status_code == 429:
-                print(f"  Rate limited — waiting {_RETRY_DELAY}s...")
+                logger.info(f"  Rate limited — waiting {_RETRY_DELAY}s...")
                 time.sleep(_RETRY_DELAY)
                 resp = client.get(url)
             resp.raise_for_status()
             data = resp.json()
             results.extend(data["results"])
             url = data.get("next")
-            print(f"  Fetched {len(results)} exercises...")
+            logger.info(f"  Fetched {len(results)} exercises...")
 
     return results
 
@@ -99,9 +104,9 @@ def ingest_wger_exercises() -> list[dict]:
     Fetch all wger exercises, format them as documents, and return the list.
     Call indexer.index_documents() on the result to embed and persist.
     """
-    print("Fetching wger exercises...")
+    logger.info("Fetching wger exercises...")
     raw = fetch_exercises()
     docs = [_format_exercise_doc(ex) for ex in raw]
     docs = [d for d in docs if d is not None]
-    print(f"Prepared {len(docs)} exercise documents (from {len(raw)} raw)")
+    logger.info(f"Prepared {len(docs)} exercise documents (from {len(raw)} raw)")
     return docs

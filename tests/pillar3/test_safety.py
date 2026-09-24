@@ -1,5 +1,6 @@
 """Safety Layer 1 classifier tests."""
 import pytest
+
 from zenic.safety.layer1_classifier import is_harmful
 
 _SHOULD_BLOCK = [

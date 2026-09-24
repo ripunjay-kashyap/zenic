@@ -1,10 +1,11 @@
 """Unit tests for deterministic calculation tools. Zero tolerance for numeric error."""
 import pytest
+
 from zenic.agent.tools.calculations import (
     calculate_bmr,
-    calculate_tdee,
     calculate_macros,
     calculate_protein_range,
+    calculate_tdee,
 )
 
 

@@ -1,21 +1,43 @@
+import html
 import os
 from datetime import datetime
-import streamlit as st
-from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+import streamlit as st
+
+# Importing config loads .env (override=True, so it wins over stale shell vars)
+# and validates the configuration before anything else touches it.
+from zenic.config import get_settings
+from zenic.errors import ConfigError, ZenicError
+from zenic.logging_config import bind_correlation_id, get_logger
+
+logger = get_logger(__name__)
 
 from zenic.agent.graph import app as zenic_app
-from zenic.agent.state import ZenicState
+from zenic.agent.graph import initial_state
+
+
+def esc(value) -> str:
+    """Escape a value for interpolation into the raw HTML blocks below.
+
+    Profile values originate from an LLM extraction of user-supplied text, so
+    they are untrusted input; without escaping, a crafted message could inject
+    markup into the sidebar.
+    """
+    return html.escape(str(value), quote=True)
 
 
 def _greeting() -> str:
     """Time-of-day greeting for the hero."""
     hour = datetime.now().hour
-    if hour < 5:   return "Still up"
-    if hour < 12:  return "Good morning"
-    if hour < 17:  return "Good afternoon"
-    if hour < 22:  return "Good evening"
+    if hour < 5:
+        return "Still up"
+    if hour < 12:
+        return "Good morning"
+    if hour < 17:
+        return "Good afternoon"
+    if hour < 22:
+        return "Good evening"
     return "Burning the midnight oil"
 
 # ---------------------------------------------------------------------------
@@ -35,6 +57,19 @@ def load_css(file_name):
 css_path = os.path.join(os.path.dirname(__file__), "styles.css")
 if os.path.exists(css_path):
     load_css(css_path)
+
+# ---------------------------------------------------------------------------
+# Startup checks — fail visibly, not on the first user message
+# ---------------------------------------------------------------------------
+try:
+    _settings = get_settings()
+    _settings.require_groq_api_key()
+except ConfigError as exc:
+    st.error(f"Zenic is not configured correctly.\n\n{exc}")
+    logger.error("startup configuration check failed", extra={"error": str(exc)})
+    st.stop()
+
+logger.info("ui started", extra={"env": _settings.env, "model": _settings.groq_model})
 
 # ---------------------------------------------------------------------------
 # Session state init
@@ -89,6 +124,8 @@ with st.sidebar:
     percent = int((len(completed) / len(REQUIRED)) * 100)
 
     # ── Sync card ──────────────────────────────────────────────────────────
+    # role/aria on the track so the completeness value is announced rather than
+    # being a pair of decorative divs a screen reader skips entirely.
     st.markdown(
         f"""
         <div class="sync-card">
@@ -96,7 +133,9 @@ with st.sidebar:
                 <span class="sync-label">Bio-Sync</span>
                 <span class="sync-pct">{percent}%</span>
             </div>
-            <div class="sync-track">
+            <div class="sync-track" role="progressbar"
+                 aria-valuenow="{percent}" aria-valuemin="0" aria-valuemax="100"
+                 aria-label="Profile completeness: {len(completed)} of {len(REQUIRED)} fields">
                 <div class="sync-fill" style="width:{percent}%;"></div>
             </div>
         </div>
@@ -123,12 +162,12 @@ with st.sidebar:
         for key, icon in field_icons.items():
             val = profile.get(key)
             if val is not None and val != "":
-                display_val = format_profile_value(key, val)
+                display_val = esc(format_profile_value(key, val))
                 rows_html.append(
                     f"""<div class="field-row">
                         <span class="field-icon">{icon}</span>
                         <div class="field-body">
-                            <span class="field-label">{labels.get(key, key.title())}</span>
+                            <span class="field-label">{esc(labels.get(key, key.title()))}</span>
                             <span class="field-value">{display_val}</span>
                         </div>
                     </div>"""
@@ -257,52 +296,193 @@ elif st.session_state.messages:
 
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
+        # Metrics are stored on the message rather than rendered only in the run
+        # that produced them, so they survive every later rerun (profile update,
+        # PDF download, any widget interaction) instead of vanishing.
+        if msg.get("metrics"):
+            render_metric_cards(msg["metrics"])
+            st.markdown("<br>", unsafe_allow_html=True)
         st.write(msg["content"])
 
-typed_prompt = st.chat_input("Ask Zenic — nutrition, training, or a precision plan…")
+typed_prompt = st.chat_input("Ask Zenic — nutrition, training, or a precision plan…", max_chars=4000)
 
 prompt = typed_prompt or st.session_state.pending_prompt
 if st.session_state.pending_prompt:
     st.session_state.pending_prompt = None
+
+#: Shown when a turn fails. Deliberately free of internals — the detail goes to
+#: the logs under the turn's correlation id, not to the user's screen.
+_GENERIC_ERROR = (
+    "Something went wrong while processing that. The issue has been logged — "
+    "please try again in a moment."
+)
+
+
+#: What each graph node is doing, in the user's terms. A retrieval turn is
+#: dominated by cross-encoder reranking on CPU (~30s of a ~35s turn), so a single
+#: opaque spinner leaves the user with no idea whether anything is happening.
+_NODE_LABELS = {
+    "safety_check": "Checking your message",
+    "router": "Understanding your question",
+    "profile_check": "Reviewing your profile",
+    "profile_gather": "Working out what's missing",
+    "rag_retrieval": "Searching the knowledge base",
+    "calculator": "Running your numbers",
+    "food_retrieval": "Finding foods that fit",
+    "exercise_retrieval": "Selecting exercises",
+    "plan_compose": "Composing your plan",
+    "pdf_generate": "Building your PDF",
+    "data_ingestion": "Loading your week",
+    "trend_analysis": "Analysing trends",
+    "insight_generation": "Drawing out insights",
+    "generate": "Writing the answer",
+    "safety_response": "Preparing a response",
+}
+
+#: The stage that follows routing, per intent. LangGraph reports a node when it
+#: *finishes*, so naming the node that just completed would leave a stale label
+#: on screen for the whole of the next (and by far the longest) step. Announcing
+#: the upcoming stage instead keeps the label truthful.
+_STAGE_AFTER_ROUTER = {
+    "nutrition_qa": "Searching the knowledge base",
+    "calculate": "Reviewing your profile",
+    "meal_plan": "Reviewing your profile",
+    "workout_plan": "Reviewing your profile",
+    "weekly_summary": "Loading your week",
+    "general_chat": "Writing the answer",
+}
+
+_MERGED_DICT_FIELDS = ("tool_results", "plan_data", "user_profile")
+
+
+def _next_stage_label(completed_node: str, state: dict) -> str:
+    """Human label for the work that starts now that ``completed_node`` is done."""
+    if completed_node == "router":
+        return _STAGE_AFTER_ROUTER.get(state.get("intent", ""), "Working on it")
+    if completed_node in ("rag_retrieval", "calculator", "plan_compose"):
+        return _NODE_LABELS["generate"]
+    if completed_node in ("food_retrieval", "exercise_retrieval"):
+        return _NODE_LABELS["plan_compose"]
+    return _NODE_LABELS.get(completed_node, completed_node.replace("_", " ").title())
+
+
+def _merge_partial(state: dict, partial) -> None:
+    """Fold one node's returned fields into the accumulated state."""
+    if not isinstance(partial, dict):
+        return
+    for key, value in partial.items():
+        if key == "messages":
+            new = value if isinstance(value, list) else [value]
+            state["messages"] = list(state.get("messages") or []) + new
+        elif key in _MERGED_DICT_FIELDS and isinstance(value, dict):
+            state[key] = {**(state.get(key) or {}), **value}
+        else:
+            state[key] = value
+
+
+def run_turn(messages: list[dict], user_profile: dict, on_stage=None) -> tuple[dict | None, str | None]:
+    """Invoke the agent, reporting each stage as it starts.
+
+    Streams the graph rather than calling invoke() so the UI can name the stage
+    currently running. Returns (final_state, error_message).
+    """
+    correlation_id = bind_correlation_id()
+    state = initial_state(
+        [{"role": m["role"], "content": m["content"]} for m in messages[-12:]],
+        user_profile,
+    )
+    try:
+        accumulated = dict(state)
+        for step in zenic_app.stream(state):
+            for node_name, partial in step.items():
+                _merge_partial(accumulated, partial)
+                if on_stage:
+                    on_stage(_next_stage_label(node_name, accumulated))
+        return accumulated, None
+    except ZenicError as exc:
+        # Operational failures carry a message written for the user.
+        logger.warning("turn failed", extra={"error_type": type(exc).__name__})
+        return None, str(exc)
+    except Exception:
+        logger.error("unhandled error during turn")
+        return None, f"{_GENERIC_ERROR} (reference: {correlation_id})"
+
+
+def extract_reply(final_state: dict) -> str:
+    """Last assistant message from the final state, whatever shape it is in."""
+    for message in reversed(final_state.get("messages") or []):
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "type", None)
+        if role in ("ai", "assistant"):
+            return (
+                message.get("content", "")
+                if isinstance(message, dict)
+                else getattr(message, "content", "")
+            )
+    return "Sorry, I couldn't generate a response."
+
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
-    initial_state: ZenicState = {
-        "messages": [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-        "user_profile": st.session_state.user_profile,
-        "intent": "",
-        "profile_complete": False,
-        "missing_fields": [],
-        "awaiting_input": False,
-        "retrieved_context": [],
-        "tool_results": {},
-        "plan_data": {},
-        "safety_flag": False,
-        "safety_reason": "",
-    }
-
     with st.chat_message("assistant"):
-        with st.spinner("Processing bio-data..."):
-            final_state = zenic_app.invoke(initial_state)
+        status = st.status("Reading your message", expanded=False)
+        seen_stages: list[str] = []
 
-        assistant_msgs = [m for m in final_state.get("messages", []) if getattr(m, "type", None) == "ai"]
-        reply = assistant_msgs[-1].content if assistant_msgs else "Sorry, I couldn't generate a response."
+        def report(stage: str) -> None:
+            # Repeated labels (e.g. two retrieval nodes in a plan) would otherwise
+            # log the same line twice.
+            if not seen_stages or seen_stages[-1] != stage:
+                seen_stages.append(stage)
+                status.write(stage)
+            status.update(label=stage)
 
-        if final_state.get("intent") == "calculate":
-            render_metric_cards(final_state.get("tool_results"))
-            st.markdown("<br>", unsafe_allow_html=True)
+        final_state, error = run_turn(
+            st.session_state.messages, st.session_state.user_profile, on_stage=report
+        )
+        status.update(
+            label="Couldn't complete that" if error else "Done",
+            state="error" if error else "complete",
+        )
 
-        st.write(reply)
+        metrics = None
+        if error:
+            st.error(error)
+            reply = error
+        else:
+            reply = extract_reply(final_state)
+            if final_state.get("intent") == "calculate":
+                metrics = final_state.get("tool_results") or {}
+                render_metric_cards(metrics)
+                st.markdown("<br>", unsafe_allow_html=True)
+            st.write(reply)
 
-    st.session_state.messages.append({"role": "assistant", "content": reply})
+    assistant_message = {"role": "assistant", "content": reply}
+    if metrics:
+        assistant_message["metrics"] = metrics
+    st.session_state.messages.append(assistant_message)
+    st.session_state.messages = st.session_state.messages[-40:]
 
-    if final_state.get("user_profile"):
-        st.session_state.user_profile = final_state["user_profile"]
+    if final_state:
+        # The sidebar renders near the top of the script, before this turn ran, so
+        # a profile or PDF produced here is only visible after a rerun — without
+        # one the sidebar shows stale values for a whole extra turn.
+        needs_rerun = False
 
-    pdf_path = (final_state.get("tool_results") or {}).get("pdf_path")
-    if pdf_path:
-        st.session_state.pdf_path = pdf_path
-        st.rerun()
+        profile = final_state.get("user_profile")
+        if profile and profile != st.session_state.user_profile:
+            st.session_state.user_profile = profile
+            needs_rerun = True
+
+        pdf_path = (final_state.get("tool_results") or {}).get("pdf_path")
+        if pdf_path and pdf_path != st.session_state.pdf_path:
+            if st.session_state.pdf_path:
+                old_path = Path(st.session_state.pdf_path)
+                old_path.unlink(missing_ok=True)
+                old_path.parent.rmdir()
+            st.session_state.pdf_path = pdf_path
+            needs_rerun = True
+
+        if needs_rerun:
+            st.rerun()

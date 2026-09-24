@@ -1,0 +1,63 @@
+# Keep the build context small and free of anything secret or developer-local.
+# NOTE: data/ is NOT excluded — bm25_corpus.json and mock_weekly.json are read
+# at runtime and must be present in the image.
+
+# Version control & CI
+.git
+.gitignore
+.github
+
+# Virtual environments (multi-GB, and platform-specific)
+.venv/
+venv/
+env/
+
+# Local vector DB — production uses Qdrant Cloud
+chroma_db/
+
+# Not needed at runtime
+tests/
+docs/
+scripts/
+debug_*.py
+eval_data/
+eval_results/
+ragas_results/
+OVERVIEW/
+TESTING/
+
+# Screenshots & scratch output
+.playwright-mcp/
+*.png
+tmp_*.txt
+summary.txt
+NEXT_SESSION.md
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.pyc
+.coverage
+htmlcov/
+
+# Secrets — never copy these into an image layer
+.env
+.env.*
+!.env.example
+
+# Editor / assistant config
+.claude/
+.gemini/
+.vscode/
+.idea/
+*.code-workspace
+
+.agents/
+.codex/
+.streamlit/secrets.toml
+CLAUDE.md
+data/*
+!data/bm25_corpus.json
+!data/mock_weekly.json

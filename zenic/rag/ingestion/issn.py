@@ -18,6 +18,9 @@ import hashlib
 import re
 from pathlib import Path
 
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Common ISSN position stand section headers (used to detect section boundaries)
 _SECTION_PATTERNS = [
@@ -33,8 +36,8 @@ def _extract_pdf_text(pdf_path: str) -> str:
     """Extract text from PDF using pypdf."""
     try:
         from pypdf import PdfReader
-    except ImportError:
-        raise ImportError("Install pypdf: pip install pypdf")
+    except ImportError as exc:
+        raise ImportError("Install pypdf: pip install pypdf") from exc
 
     reader = PdfReader(pdf_path)
     pages = []
@@ -59,7 +62,7 @@ def _detect_sections(text: str) -> list[tuple[str, int]]:
         return [("Full Text", 0)]
     # Ensure we start from the beginning
     if matches[0][1] > 0:
-        matches = [("Introduction", 0)] + matches
+        matches = [("Introduction", 0), *matches]
     return matches
 
 
@@ -69,9 +72,10 @@ def _split_section(
     overlap: int = 500,
 ) -> list[str]:
     """Split a section into overlapping chunks if it exceeds chunk_size."""
+    if not 0 <= overlap < chunk_size:
+        raise ValueError("overlap must be nonnegative and smaller than chunk_size")
     if len(section_text) <= chunk_size:
-        return [section_text.strip()]
-
+        return [section_text.strip()] if section_text.strip() else []
     chunks = []
     start = 0
     while start < len(section_text):
@@ -84,7 +88,9 @@ def _split_section(
         chunk = section_text[start:end].strip()
         if chunk:
             chunks.append(chunk)
-        start = end - overlap
+        if end >= len(section_text):
+            break
+        start = max(start + 1, end - overlap)
     return chunks
 
 
@@ -105,10 +111,10 @@ def ingest_issn_paper(
         year:      e.g. 2017
         topic:     optional topic tag, e.g. "protein", "creatine", "caffeine"
     """
-    print(f"Ingesting ISSN paper: {title} ({authors}, {year})")
+    logger.info(f"Ingesting ISSN paper: {title} ({authors}, {year})")
     text = _extract_pdf_text(pdf_path)
     sections = _detect_sections(text)
-    print(f"  Detected {len(sections)} sections")
+    logger.info(f"  Detected {len(sections)} sections")
 
     citation_prefix = f"Source: ISSN {title} ({authors}, {year})"
 
@@ -140,7 +146,7 @@ def ingest_issn_paper(
                 },
             })
 
-    print(f"  Produced {len(docs)} chunks")
+    logger.info(f"  Produced {len(docs)} chunks")
     return docs
 
 
@@ -165,9 +171,9 @@ def ingest_issn_papers(papers_dir: str) -> list[dict]:
     for pdf in sorted(dir_path.glob("*.pdf")):
         meta_path = pdf.with_suffix(".json")
         if not meta_path.exists():
-            print(f"  Skipping {pdf.name} — no companion .json metadata file")
+            logger.info(f"  Skipping {pdf.name} — no companion .json metadata file")
             continue
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
         docs = ingest_issn_paper(
             str(pdf),
@@ -178,5 +184,5 @@ def ingest_issn_papers(papers_dir: str) -> list[dict]:
         )
         all_docs.extend(docs)
 
-    print(f"Total ISSN documents: {len(all_docs)}")
+    logger.info(f"Total ISSN documents: {len(all_docs)}")
     return all_docs

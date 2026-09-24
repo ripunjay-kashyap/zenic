@@ -1,20 +1,19 @@
 """
-Verify the agent uses RAG for in-index queries and only falls back to live APIs
-for genuinely absent items. Target: RAG hit rate >= 85%, 0 false API fallbacks.
+Check RAG versus live USDA routing for the bundled corpus.
 
-Index ground-truth (confirmed via debug_scores.py, 2026-04-09):
-  IN index  : chicken breast, egg, vitamin D (NIH_ODS), ISSN protein, barbell row
-              (wger), cherimoya raw (USDA SR Legacy — exotic but indexed)
-  NOT indexed: banana (only baby-food variants in 3k-chunk USDA subset), raw
-               spinach (only baby-food spinach), white rice (not in USDA subset),
-               jackfruit seeds (not in any source).
-  Reranker scores (BAAI/bge-reranker-base): in-index >= 0.9, absent < 0.15.
-  Threshold 0.5 cleanly separates the two groups.
+Requires configured Groq and USDA credentials and a populated vector store.
+These fixed expectations must be reviewed if the corpus changes. Missing foods
+may use relevant API evidence or abstain if that evidence is unavailable. Any
+route mismatch exits nonzero; this is a functional check, not a quality score.
 """
 import json
+
 from dotenv import load_dotenv
+
 load_dotenv()
+from zenic.agent.messages import message_content
 from zenic.agent.trace import run_with_trace
+from zenic.rag.pipeline import NO_EVIDENCE_RESPONSE
 
 _CASES = [
     # --- Confirmed IN-INDEX (should use RAG, score >> 0.5) ---
@@ -29,22 +28,27 @@ _CASES = [
 
 
 def main():
-    stats = {"total": 0, "correctly_used_rag": 0, "correctly_used_api": 0,
-             "false_api_fallback": 0, "false_rag_attempt": 0, "failures": []}
+    stats = {"total": 0, "correctly_used_rag": 0, "correctly_used_api": 0, "correctly_abstained": 0,
+             "false_api_fallback": 0, "false_rag_attempt": 0,
+             "missing_rag_route": 0, "failures": []}
 
     for case in _CASES:
         trace = run_with_trace(case["query"])
         tools = trace["tools_called"]
         used_rag = "rag_retrieval" in tools
         used_api = "usda_api" in tools or "wger_api" in tools
+        messages = trace.get("final_state", {}).get("messages", [])
+        answer = message_content(messages[-1]) if messages else ""
         stats["total"] += 1
 
         if case["should_use_rag"] and used_rag and not used_api:
             stats["correctly_used_rag"] += 1
         elif not case["should_use_rag"] and used_api:
             stats["correctly_used_api"] += 1
-        elif case["should_use_rag"] and not used_rag:
-            stats["false_api_fallback"] += 1
+        elif not case["should_use_rag"] and used_rag and answer == NO_EVIDENCE_RESPONSE:
+            stats["correctly_abstained"] += 1
+        elif case["should_use_rag"]:
+            stats["false_api_fallback" if used_api else "missing_rag_route"] += 1
             stats["failures"].append({"query": case["query"], "expected": "rag", "actual": tools})
         else:
             stats["false_rag_attempt"] += 1
@@ -57,13 +61,10 @@ def main():
     print(f"\nRAG HIT RATE (in-scope queries): {rag_rate:.0%}")
     print(f"FALSE API FALLBACKS:             {stats['false_api_fallback']}")
 
-    if rag_rate >= 0.85 and stats["false_api_fallback"] == 0:
-        print("\nGREEN -- Ready to proceed to Pillar 2")
-    elif rag_rate >= 0.70:
-        print("\nYELLOW -- Index has gaps; check inspect_chunks.py")
-    else:
-        print("\nRED -- RAG is not functioning as primary retrieval path")
+    passed = not stats["failures"]
+    print("\nPASS — all routing checks passed" if passed else "\nFAIL — routing mismatches found")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

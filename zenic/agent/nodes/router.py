@@ -1,22 +1,28 @@
 """Intent classification using structured LLM output."""
-import json
-import os
+from __future__ import annotations
 
-from groq import Groq
+from zenic.agent.messages import to_openai_messages
 from zenic.agent.state import ZenicState
+from zenic.errors import LLMError
+from zenic.llm import chat_completion_json
+from zenic.logging_config import get_logger
 
-_INTENTS = ["nutrition_qa", "calculate", "meal_plan", "workout_plan", "weekly_summary", "general_chat"]
-_groq_client: Groq | None = None
+logger = get_logger(__name__)
 
+INTENTS = (
+    "nutrition_qa",
+    "calculate",
+    "meal_plan",
+    "workout_plan",
+    "weekly_summary",
+    "general_chat",
+)
 
-def _groq() -> Groq:
-    global _groq_client
-    if _groq_client is None:
-        _groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
-    return _groq_client
+#: Unknown classifications still require evidence before answering health questions.
+DEFAULT_INTENT = "nutrition_qa"
 
 _SYSTEM_PROMPT = f"""Classify the user's message into exactly one intent.
-Return a JSON object with a single key "intent" from this list: {_INTENTS}.
+Return a JSON object with a single key "intent" from this list: {list(INTENTS)}.
 
 nutrition_qa covers ANY factual lookup answered from the knowledge base:
 food nutrients, supplement guidelines, exercise descriptions, muscles worked,
@@ -42,26 +48,24 @@ general_chat covers greetings, questions about Zenic itself, and anything that
 is NOT a factual nutrition/exercise lookup, calculation, plan request, or summary.
 """
 
-# LangChain message types → OpenAI/Groq API roles
-_ROLE_MAP = {"human": "user", "ai": "assistant", "system": "system"}
-
 
 def run(state: ZenicState) -> dict:
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-    for msg in state.get("messages", []):
-        if isinstance(msg, dict):
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-        else:
-            role = _ROLE_MAP.get(getattr(msg, "type", "human"), "user")
-            content = msg.content
-        messages.append({"role": role, "content": content})
+    messages.extend(to_openai_messages(state.get("messages", [])))
 
-    response = _groq().chat.completions.create(
-        model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
-        messages=messages,
-        response_format={"type": "json_object"},
-    )
-    result = json.loads(response.choices[0].message.content)
-    intent = result.get("intent", "general_chat")
+    try:
+        result = chat_completion_json(messages, purpose="router")
+    except LLMError:
+        logger.warning("intent classification failed — defaulting to %s", DEFAULT_INTENT)
+        return {"intent": DEFAULT_INTENT}
+
+    intent = result.get("intent")
+    if intent not in INTENTS:
+        logger.warning(
+            "router returned an unknown intent — defaulting",
+            extra={"default": DEFAULT_INTENT},
+        )
+        intent = DEFAULT_INTENT
+
+    logger.info("intent classified", extra={"intent": intent})
     return {"intent": intent}

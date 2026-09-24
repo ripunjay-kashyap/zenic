@@ -8,25 +8,26 @@ needed to drive the conditional routing logic.
 
 No API keys required. These tests are fast (~1–2 s total).
 """
-import pytest
 from contextlib import ExitStack
 from unittest.mock import patch
 
-import zenic.agent.nodes.safety_check as _safety_check
-import zenic.agent.nodes.router as _router
+import pytest
+
+import zenic.agent.nodes.calculator as _calculator
+import zenic.agent.nodes.data_ingestion as _data_ingestion
+import zenic.agent.nodes.exercise_retrieval as _exercise_retrieval
+import zenic.agent.nodes.food_retrieval as _food_retrieval
+import zenic.agent.nodes.generate as _generate
+import zenic.agent.nodes.insight_generation as _insight_generation
+import zenic.agent.nodes.pdf_generate as _pdf_generate
+import zenic.agent.nodes.plan_compose as _plan_compose
 import zenic.agent.nodes.profile_check as _profile_check
 import zenic.agent.nodes.profile_gather as _profile_gather
 import zenic.agent.nodes.rag_retrieval as _rag_retrieval
-import zenic.agent.nodes.calculator as _calculator
-import zenic.agent.nodes.food_retrieval as _food_retrieval
-import zenic.agent.nodes.exercise_retrieval as _exercise_retrieval
-import zenic.agent.nodes.plan_compose as _plan_compose
-import zenic.agent.nodes.pdf_generate as _pdf_generate
-import zenic.agent.nodes.data_ingestion as _data_ingestion
-import zenic.agent.nodes.trend_analysis as _trend_analysis
-import zenic.agent.nodes.insight_generation as _insight_generation
-import zenic.agent.nodes.generate as _generate
+import zenic.agent.nodes.router as _router
+import zenic.agent.nodes.safety_check as _safety_check
 import zenic.agent.nodes.safety_response as _safety_response
+import zenic.agent.nodes.trend_analysis as _trend_analysis
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -134,16 +135,21 @@ def _invoke_with_mocks(node_returns: dict) -> list[str]:
         ["safety_check", "router", "profile_check", "profile_gather"],
     ),
     (
+        # meal_plan runs the calculator first so plan_compose gets real macro targets.
         "meal_plan_complete_profile",
         {
             _safety_check:   {"safety_flag": False},
             _router:         {"intent": "meal_plan"},
             _profile_check:  {"profile_complete": True},
+            _calculator:     {"tool_results": {"tdee": 2400}},
             _food_retrieval: {"retrieved_context": []},
             _plan_compose:   {"plan_data": {}},
             _pdf_generate:   {},
         },
-        ["safety_check", "router", "profile_check", "food_retrieval", "plan_compose", "pdf_generate"],
+        [
+            "safety_check", "router", "profile_check", "calculator",
+            "food_retrieval", "plan_compose", "pdf_generate",
+        ],
     ),
     (
         "workout_plan_complete_profile",

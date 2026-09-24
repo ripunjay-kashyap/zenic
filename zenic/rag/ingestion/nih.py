@@ -8,14 +8,17 @@ never split numeric values from their life-stage context (age/gender/condition).
 
 Metadata: nutrient_name, category, source="NIH_ODS", url
 """
+import hashlib
 import re
 import time
-import hashlib
-
 from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
+
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 _BASE = "https://ods.od.nih.gov"
 _LIST_URL = f"{_BASE}/factsheets/list-all/"
@@ -47,15 +50,6 @@ def _fetch_factsheet_urls() -> list[tuple[str, str]]:
             unique.append((name, url))
 
     return unique
-
-
-def _clean_html(html: str) -> str:
-    """Strip HTML tags and normalise whitespace."""
-    text = re.sub(r"<[^>]+>", " ", html)
-    text = re.sub(r"&nbsp;", " ", text)
-    text = re.sub(r"&[a-z]+;", " ", text)
-    text = re.sub(r"\s{2,}", " ", text)
-    return text.strip()
 
 
 def _extract_factsheet_text(url: str) -> str:
@@ -138,15 +132,15 @@ def ingest_nih_fact_sheets(limit: int | None = None) -> list[dict]:
 
     limit: max number of fact sheets to fetch (None = all ~100+)
     """
-    print("Fetching NIH ODS fact sheet list...")
+    logger.info("Fetching NIH ODS fact sheet list...")
     sheets = _fetch_factsheet_urls()
     if limit:
         sheets = sheets[:limit]
-    print(f"  Found {len(sheets)} fact sheets")
+    logger.info(f"  Found {len(sheets)} fact sheets")
 
     docs = []
     for i, (name, url) in enumerate(sheets, 1):
-        print(f"  [{i}/{len(sheets)}] {name}")
+        logger.info(f"  [{i}/{len(sheets)}] {name}")
         try:
             text = _extract_factsheet_text(url)
             if not text:
@@ -167,9 +161,9 @@ def ingest_nih_fact_sheets(limit: int | None = None) -> list[dict]:
                     },
                 })
         except Exception as e:
-            print(f"    ERROR: {e}")
+            logger.info(f"    ERROR: {e}")
 
         time.sleep(_REQUEST_DELAY)
 
-    print(f"Prepared {len(docs)} NIH ODS documents")
+    logger.info(f"Prepared {len(docs)} NIH ODS documents")
     return docs

@@ -1,0 +1,13 @@
+# Normalise line endings so files edited on Windows don't show up as
+# wholly-rewritten in every diff. Several notes and eval outputs had drifted to
+# CRLF, producing 3,700-line "changes" that were nothing but line terminators.
+* text=auto eol=lf
+
+# Binary — never touch these.
+*.png binary
+*.jpg binary
+*.pdf binary
+
+# Generated / bulk data: keep out of diffs and language statistics.
+data/bm25_corpus.json linguist-generated=true
+requirements.lock.txt linguist-generated=true

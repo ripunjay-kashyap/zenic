@@ -13,9 +13,9 @@ Run with: pytest tests/pillar1/test_retrieval_spot_check.py -v
 Requires: GROQ_API_KEY (for multi-query expansion)
 """
 import json
-import os
-import pytest
 from pathlib import Path
+
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -35,7 +35,7 @@ _SKIP_CASE_IDS = {"p1_009", "p1_010"}  # RAG-vs-API enforcement — covered by r
 
 
 def _load_cases():
-    with open(_EVAL_PATH) as f:
+    with open(_EVAL_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -50,7 +50,12 @@ def _check_source_indexed(source: str) -> bool:
 @pytest.fixture(scope="module")
 def pipeline():
     """Load the retrieval pipeline once for all tests in this module."""
-    from zenic.rag.pipeline import generate_multi_queries, hybrid_search, rerank, _try_load_bm25_from_disk
+    from zenic.rag.pipeline import (
+        _try_load_bm25_from_disk,
+        generate_multi_queries,
+        hybrid_search,
+        rerank,
+    )
     _try_load_bm25_from_disk()
     return generate_multi_queries, hybrid_search, rerank
 
@@ -68,9 +73,8 @@ def test_retrieval_spot_check(case, pipeline):
     # Skip if required source not indexed
     if expected_source and expected_source in _SOURCE_SKIP:
         skip_reason = _SOURCE_SKIP[expected_source]
-        if skip_reason:
-            if not _check_source_indexed(expected_source.split(" ")[0]):
-                pytest.skip(f"{case_id} — {skip_reason}")
+        if skip_reason and not _check_source_indexed(expected_source.split(" ")[0]):
+            pytest.skip(f"{case_id} — {skip_reason}")
 
     generate_multi_queries, hybrid_search, rerank = pipeline
 
@@ -94,6 +98,15 @@ def test_retrieval_spot_check(case, pipeline):
             f"{case_id}: None of {expected_keywords} found in top-7 chunks.\n"
             f"Sources retrieved: {sources_found}\n"
             f"Query: {query}"
+        )
+
+    # General food-list queries can be answered by authoritative guidelines,
+    # while nutrient-quantity queries below continue to require USDA tables.
+    if acceptable_sources := case.get("acceptable_sources"):
+        assert set(sources_found) & set(acceptable_sources)
+        food_matches = [word for word in case["required_food_keywords"] if word in all_text]
+        assert len(food_matches) >= case["minimum_food_matches"], (
+            f"{case_id}: expected named plant foods, found {food_matches}"
         )
 
     # Assert expected source is present in top-7 (if specified and indexed)

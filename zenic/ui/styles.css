@@ -76,6 +76,7 @@ html, body, .stApp {
    double_arrow_left") to leak when icons are revealed (sidebar collapse on
    hover, etc.). Restore the icon font here. */
 [data-testid="stIconMaterial"],
+[data-testid^="stExpanderIcon"],
 span.material-symbols-rounded,
 span.material-symbols-outlined,
 span.material-icons {
@@ -960,4 +961,223 @@ textarea[data-testid="stChatInputTextArea"]::placeholder {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--iris-violet);
     opacity: 0.4;
+}
+
+/* ═════════════════════════════════════════════════════════════
+   ACCESSIBILITY, RESPONSIVENESS & SEMANTIC STATE
+   Extends "Refined Bioluminescence" — no token or component
+   above is overridden, only gaps filled. Added because the
+   sheet previously had zero media queries, no keyboard focus
+   state, and no reduced-motion path for its nine animations.
+   ═════════════════════════════════════════════════════════════ */
+
+:root {
+    /* Focus ring derived from the existing iris accent so keyboard
+       navigation reads as part of the same visual language. */
+    --focus-ring:    rgba(167, 139, 250, 0.62);
+    --focus-halo:    rgba(167, 139, 250, 0.14);
+
+    /* Semantic state — deliberately distinct from the iris accent, which
+       carries brand rather than meaning. */
+    --danger:        #f87171;
+    --danger-bg:     rgba(248, 113, 113, 0.07);
+    --danger-border: rgba(248, 113, 113, 0.28);
+}
+
+/* ── KEYBOARD FOCUS ──────────────────────────────────────────
+   Every interactive control needs a visible focus state (WCAG 2.4.7).
+   :focus-visible only, so pointer users never see the ring. */
+.stApp :is(button, a, input, textarea, select, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid var(--focus-ring) !important;
+    outline-offset: 3px !important;
+    border-radius: 10px !important;
+    box-shadow: 0 0 0 6px var(--focus-halo) !important;
+}
+
+/* The chat input owns its own focus treatment (:focus-within, above),
+   so suppress the generic ring inside it to avoid a double outline. */
+[data-testid="stChatInput"] :is(textarea, button):focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* ── REDUCED MOTION ──────────────────────────────────────────
+   The orb breathes, rotates and pulses continuously. That is the
+   signature of the page, but it is also exactly the kind of
+   persistent motion that triggers vestibular symptoms (WCAG 2.3.3).
+   Hold the orb at a composed frame rather than hiding it. */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+    .orb,
+    .orb-glow,
+    .orb::before,
+    .orb::after {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+    }
+    .metric-card:hover {
+        transform: none !important;
+    }
+}
+
+/* ── NUMERALS ────────────────────────────────────────────────
+   Metrics and the sync percentage are read as data; lining figures
+   stop them jittering as values change between turns. */
+.metric-value,
+.sync-pct,
+.field-value {
+    font-variant-numeric: tabular-nums !important;
+    font-feature-settings: "tnum" 1 !important;
+}
+
+/* ── SEMANTIC STATE: ERRORS ──────────────────────────────────
+   st.error() otherwise renders Streamlit's stock red block, which
+   fights the palette. Errors are surfaced by the UI's run_turn()
+   failure path, so this is a real state, not a hypothetical one. */
+[data-testid="stAlert"] {
+    background: var(--danger-bg) !important;
+    border: 1px solid var(--danger-border) !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+    color: var(--text) !important;
+}
+[data-testid="stAlert"] p {
+    color: var(--text) !important;
+    font-family: 'Geist', system-ui, sans-serif !important;
+    font-size: 0.9rem !important;
+}
+[data-testid="stAlert"] svg { fill: var(--danger) !important; }
+
+/* ── RESPONSIVE ──────────────────────────────────────────────
+   The sheet was authored for a wide desktop window only: the chatbar
+   is pinned past a hard-coded 244px sidebar gutter and the entry-point
+   divider is positioned with fixed ±175px offsets, both of which break
+   below roughly 900px. */
+
+/* Tablet / narrow desktop */
+@media (max-width: 1024px) {
+    .main .block-container,
+    [data-testid="stMainBlockContainer"] {
+        max-width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+}
+
+/* Streamlit overlays the sidebar rather than reserving a gutter at this
+   width, so the chatbar must span the full viewport or it sits off-centre. */
+@media (max-width: 860px) {
+    [data-testid="stBottom"] {
+        left: 0 !important;
+    }
+    .hero {
+        padding-top: 2rem !important;
+    }
+    .hero-greeting {
+        font-size: clamp(1.9rem, 7vw, 2.6rem) !important;
+    }
+    .hero-sub {
+        font-size: 0.92rem !important;
+        padding: 0 0.5rem !important;
+    }
+    /* Fixed pixel offsets overflow a narrow viewport — shorten the rules
+       proportionally instead. */
+    .prompt-section-label::before { left: 8% !important; }
+    .prompt-section-label::after  { right: 8% !important; }
+}
+
+/* Phone */
+@media (max-width: 560px) {
+    .main .block-container,
+    [data-testid="stMainBlockContainer"] {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-bottom: 10rem !important;
+    }
+    /* Sample prompts and metric cards are laid out by st.columns, which keeps
+       them side by side at any width; stack them so neither is unreadable. */
+    [data-testid="stHorizontalBlock"] {
+        flex-direction: column !important;
+        gap: 0.6rem !important;
+    }
+    [data-testid="stColumn"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 0 !important;
+    }
+    .metric-card {
+        padding: 1.1rem 1rem !important;
+    }
+    .metric-value {
+        font-size: 1.9rem !important;
+    }
+    .orb-wrap {
+        transform: scale(0.78) !important;
+    }
+    .prompt-section-label::before,
+    .prompt-section-label::after {
+        display: none !important;
+    }
+}
+
+/* Very short viewports (landscape phones): the orb dominates and pushes
+   the entry points below the fold. */
+@media (max-height: 620px) {
+    .orb-wrap { transform: scale(0.6) !important; }
+    .hero { padding-top: 1rem !important; }
+}
+
+/* ── HIGH CONTRAST ───────────────────────────────────────────
+   The default borders sit at 5–8% white, which disappears entirely
+   when the OS asks for increased contrast. */
+@media (prefers-contrast: more) {
+    :root {
+        --border-soft:   rgba(255, 255, 255, 0.22);
+        --border:        rgba(255, 255, 255, 0.34);
+        --border-strong: rgba(255, 255, 255, 0.52);
+        --text-mid:      rgba(235, 236, 242, 0.86);
+        --text-dim:      rgba(235, 236, 242, 0.68);
+    }
+}
+
+/* ── PROGRESS / STATUS ───────────────────────────────────────
+   st.status() reports which stage of the graph is running. A retrieval
+   turn is dominated by cross-encoder reranking on CPU, so this panel is
+   on screen for most of the wait — it gets the same treatment as the
+   cards rather than Streamlit's default expander chrome. */
+[data-testid="stStatusWidget"],
+[data-testid="stExpander"]:has([data-testid="stStatusWidget"]) {
+    background: var(--bg-glass) !important;
+    border: 1px solid var(--border-soft) !important;
+    border-radius: 12px !important;
+    box-shadow: none !important;
+}
+
+[data-testid="stExpander"] summary {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.68rem !important;
+    letter-spacing: 0.12em !important;
+    text-transform: uppercase !important;
+    color: var(--text-mid) !important;
+}
+
+[data-testid="stExpander"] summary:hover {
+    color: var(--text) !important;
+}
+
+/* Stage log inside the panel reads as a sequence, not prose. */
+[data-testid="stExpanderDetails"] p {
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.72rem !important;
+    color: var(--text-dim) !important;
+    letter-spacing: 0.02em !important;
+    margin: 0.15rem 0 !important;
 }

@@ -15,6 +15,7 @@ Requires: GROQ_API_KEY in .env, populated vector DB + BM25 corpus.
 import argparse
 import sys
 import textwrap
+
 from dotenv import load_dotenv
 
 # Ensure Unicode output works on Windows terminals
@@ -23,7 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 load_dotenv()
 
-from zenic.rag.pipeline import retrieve, generate, hybrid_search, rerank
+from zenic.rag.pipeline import generate, hybrid_search, rerank, retrieve
 
 # ---------------------------------------------------------------------------
 # 5 queries chosen to cover diverse failure modes
@@ -116,23 +117,7 @@ def run_case(case: dict) -> None:
     print()
 
     # --- Generation (with rate-limit retry) ---
-    import time
-    from groq import RateLimitError
-    import re as _re
-
-    for attempt in range(10):
-        try:
-            answer = generate(case["query"], chunks)
-            break
-        except RateLimitError as e:
-            # Parse "Please try again in Xm Y.Zs" from the error message
-            m = _re.search(r"try again in (\d+)m([\d.]+)s", str(e))
-            wait_s = int(m.group(1)) * 60 + float(m.group(2)) + 5 if m else 60
-            print(f"  [rate limit] Waiting {wait_s:.0f}s for token window to reset "
-                  f"(attempt {attempt+1}/10)...")
-            time.sleep(wait_s)
-    else:
-        raise RuntimeError("Rate limit exceeded after 10 retries")
+    answer = generate(case["query"], chunks)
 
     print("GENERATED ANSWER:")
     print(_SUB)

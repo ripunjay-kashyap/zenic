@@ -1,3 +1,0 @@
-  File "<string>", line 1
-    ||  goto :error
-IndentationError: unexpected indent

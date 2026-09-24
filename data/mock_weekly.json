@@ -1,0 +1,72 @@
+[
+  {
+    "date": "2026-04-02",
+    "calories": 2280,
+    "protein_g": 178,
+    "carbs_g": 235,
+    "fat_g": 72,
+    "weight_kg": 82.5,
+    "workout_planned": true,
+    "workout_completed": true
+  },
+  {
+    "date": "2026-04-03",
+    "calories": 2050,
+    "protein_g": 155,
+    "carbs_g": 210,
+    "fat_g": 65,
+    "weight_kg": 82.3,
+    "workout_planned": false,
+    "workout_completed": false
+  },
+  {
+    "date": "2026-04-04",
+    "calories": 2310,
+    "protein_g": 182,
+    "carbs_g": 240,
+    "fat_g": 74,
+    "weight_kg": 82.4,
+    "workout_planned": true,
+    "workout_completed": true
+  },
+  {
+    "date": "2026-04-05",
+    "calories": 1980,
+    "protein_g": 148,
+    "carbs_g": 200,
+    "fat_g": 62,
+    "weight_kg": 82.2,
+    "workout_planned": true,
+    "workout_completed": false
+  },
+  {
+    "date": "2026-04-06",
+    "calories": 2190,
+    "protein_g": 170,
+    "carbs_g": 225,
+    "fat_g": 69,
+    "weight_kg": 82.1,
+    "workout_planned": true,
+    "workout_completed": true
+  },
+  {
+    "date": "2026-04-07",
+    "calories": 2400,
+    "protein_g": 190,
+    "carbs_g": 248,
+    "fat_g": 78,
+    "weight_kg": 82.0,
+    "workout_planned": false,
+    "workout_completed": false
+  },
+  {
+    "date": "2026-04-08",
+    "calories": 2120,
+    "protein_g": 162,
+    "carbs_g": 218,
+    "fat_g": 67,
+    "weight_kg": 81.8,
+    "workout_planned": true,
+    "workout_completed": true
+  }
+]

@@ -3,22 +3,16 @@ Shared indexing logic — embeds documents and upserts them into the vector stor
 All ingestion modules produce list[dict] with keys: id, text, metadata.
 This module adds embeddings and persists to the store.
 """
-import os
-from typing import Callable
-from sentence_transformers import SentenceTransformer
+from collections.abc import Callable
 
+from zenic.config import get_settings
+from zenic.logging_config import get_logger
+from zenic.rag.pipeline import embed_texts
 from zenic.rag.vector_store import get_vector_store
 
-_embed_model: SentenceTransformer | None = None
+logger = get_logger(__name__)
+
 _BATCH_SIZE = 64
-
-
-def _get_embed_model() -> SentenceTransformer:
-    global _embed_model
-    if _embed_model is None:
-        model_name = os.getenv("EMBED_MODEL", "BAAI/bge-small-en-v1.5")
-        _embed_model = SentenceTransformer(model_name)
-    return _embed_model
 
 
 def index_documents(
@@ -31,16 +25,16 @@ def index_documents(
     Each document must have a unique `id`.
     """
     store = get_vector_store()
-    model = _get_embed_model()
+    store.ensure_collection(get_settings().embedding_dimensions)
     total = len(documents)
+    logger.info("indexing documents", extra={"documents": total})
 
     for start in range(0, total, _BATCH_SIZE):
         batch = documents[start : start + _BATCH_SIZE]
-        texts = [d["text"] for d in batch]
-        embeddings = model.encode(texts, show_progress_bar=False).tolist()
+        embeddings = embed_texts([d["text"] for d in batch])
         enriched = [
             {**d, "embedding": emb}
-            for d, emb in zip(batch, embeddings)
+            for d, emb in zip(batch, embeddings, strict=True)
         ]
         store.upsert(enriched)
         if progress_cb:

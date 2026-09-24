@@ -1,43 +1,59 @@
-# LLM & Agent
-groq>=0.9.0
-langchain-groq>=0.1.0
-langgraph>=0.2.0
-langchain>=0.3.0
-langchain-community>=0.3.0
+# Direct dependencies, with upper bounds so a major release cannot break a
+# rebuild unattended. For a byte-identical environment install
+# requirements.lock.txt instead — that file pins the full transitive tree and is
+# what CI and the container image use.
+#
+#   pip install -r requirements.lock.txt   # reproducible (CI, Docker)
+#   pip install -r requirements.txt        # loose, for local upgrades
+#
+# To refresh the lock after changing this file:
+#   See CONTRIBUTING.md for lock regeneration.
 
-# Evaluation LLM (Gemini judge)
-google-generativeai>=0.8.0
+# LLM & Agent
+groq>=0.9.0,<1.0
+langgraph>=0.2.0,<2.0
+
+# Evaluation LLM (Gemini/Gemma judge) — used by scripts/ragas_eval.py
+langchain-google-genai>=2.0.0,<4.0
 
 # Embeddings & Reranking
-sentence-transformers>=3.0.0  # all-MiniLM-L6-v2 or BGE-small-en-v1.5
-# cross-encoder: BGE-reranker-base or ms-marco-MiniLM-L-6-v2 (via sentence-transformers)
+# NOTE: torch is pre-installed (CPU-only) in the Dockerfile before this file.
+# Do NOT pin torch here — it would re-pull the multi-GB CUDA build.
+sentence-transformers>=5.7.0,<6.0  # BGE-small-en-v1.5 + BGE-reranker-base
 
 # Vector DBs
-chromadb>=0.5.0       # local development
-qdrant-client>=1.9.0  # production (Qdrant Cloud)
+chromadb>=0.5.0,<2.0       # local development
+qdrant-client>=1.9.0,<2.0  # production (Qdrant Cloud)
 
 # BM25 keyword search
-rank-bm25>=0.2.2
+rank-bm25>=0.2.2,<1.0
 
 # RAG Evaluation
-ragas>=0.1.0
-datasets>=2.20.0
+ragas>=0.1.0,<1.0
+datasets>=2.20.0,<6.0
 
 # PDF generation
-fpdf2>=2.7.0
+fpdf2>=2.8.0,<3.0
 
 # UI
-streamlit>=1.40.0
+streamlit>=1.40.0,<2.0
 
 # Ingestion
-pypdf>=4.0.0           # PDF text extraction (ISSN papers, dietary guidelines)
-beautifulsoup4>=4.12.0 # NIH ODS HTML scraping
+pypdf>=6.16.1,<8.0           # PDF text extraction (ISSN papers, dietary guidelines)
+beautifulsoup4>=4.12.0,<5.0 # NIH ODS HTML scraping
 
 # Utilities
-python-dotenv>=1.0.0
-pydantic>=2.0.0
-httpx>=0.27.0
+python-dotenv>=1.0.0,<2.0
+pydantic>=2.0.0,<3.0
+httpx>=0.27.0,<1.0
 
-# Testing
-pytest>=8.0.0
-pytest-asyncio>=0.23.0
+# Testing & linting
+pytest>=8.0.0,<10.0
+pytest-asyncio>=0.23.0,<2.0
+pytest-cov>=5.0.0,<9.0
+ruff>=0.6.0,<1.0
+
+# Minimum patched versions of transitive dependencies.
+gitpython>=3.1.60,<4.0
+h2>=4.4.1,<5.0
+setuptools>=83.0.0

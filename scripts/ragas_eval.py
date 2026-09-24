@@ -9,7 +9,7 @@ Metrics
   faithfulness      — is the answer grounded in the retrieved context?
   context_precision — are the retrieved chunks relevant to the question?
 
-Targets (from CLAUDE.md): faithfulness > 0.85, context_precision > 0.75
+Historical targets: faithfulness > 0.85, context_precision > 0.75
 
 Usage
 -----
@@ -74,10 +74,7 @@ def _load_cases(skip_ids: set[str], only_ids: set[str]) -> list[dict]:
 
 def _run_case(case: dict, multi_query: bool) -> dict:
     """Run one spot-check case through the RAG pipeline and return eval row."""
-    import re
-    import time
-    from groq import RateLimitError
-    from zenic.rag.pipeline import retrieve, generate
+    from zenic.rag.pipeline import generate, retrieve
 
     query = case["query"]
 
@@ -91,18 +88,7 @@ def _run_case(case: dict, multi_query: bool) -> dict:
     else:
         chunks = retrieve(query)
 
-    # generate() calls Groq — retry on rate-limit up to 10 times
-    for attempt in range(10):
-        try:
-            answer = generate(query, chunks)
-            break
-        except RateLimitError as e:
-            m = re.search(r"try again in (\d+)m([\d.]+)s", str(e))
-            wait_s = int(m.group(1)) * 60 + float(m.group(2)) + 5 if m else 60
-            print(f"  [rate limit] Waiting {wait_s:.0f}s (attempt {attempt + 1}/10)...")
-            time.sleep(wait_s)
-    else:
-        raise RuntimeError("Groq rate limit exceeded after 10 retries")
+    answer = generate(query, chunks)
 
     # RAGAS expects contexts as list of strings
     contexts = [c.get("text", c.get("content", "")) for c in chunks]
@@ -120,12 +106,13 @@ def _run_case(case: dict, multi_query: bool) -> dict:
 
 def _build_llm():
     import os
+
     from langchain_google_genai import ChatGoogleGenerativeAI
     from ragas.llms import LangchainLLMWrapper
 
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError("GOOGLE_API_KEY not set in environment / .env")
+        raise OSError("GOOGLE_API_KEY not set in environment / .env")
 
     gemini = ChatGoogleGenerativeAI(
         model="gemma-4-31b-it",
@@ -143,6 +130,7 @@ def _build_llm():
 
 def _build_embeddings():
     import os
+
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
     from ragas.embeddings import LangchainEmbeddingsWrapper
 
@@ -179,9 +167,9 @@ def main() -> None:
         print("No cases to run after applying --skip / --only filters.")
         return
 
-    print(f"\nZenic RAGAS Eval — Pillar 3")
-    print(f"Judge LLM : gemma-4-31b-it/thinking_budget=0 (GOOGLE_API_KEY)")
-    print(f"Metrics   : faithfulness (target >0.85), context_precision/no-ref (target >0.75)")
+    print("\nZenic RAGAS Eval — Pillar 3")
+    print("Judge LLM : gemma-4-31b-it/thinking_budget=0 (GOOGLE_API_KEY)")
+    print("Metrics   : faithfulness (target >0.85), context_precision/no-ref (target >0.75)")
     print(f"Cases     : {len(cases)}")
     if skip_ids:
         print(f"Skipped   : {', '.join(sorted(skip_ids))}")
@@ -217,9 +205,9 @@ def main() -> None:
     import numpy as np
     from datasets import Dataset as HFDataset
     from ragas import evaluate
-    from ragas.run_config import RunConfig
     from ragas.metrics import faithfulness
     from ragas.metrics._context_precision import LLMContextPrecisionWithoutReference
+    from ragas.run_config import RunConfig
 
     context_precision_nr = LLMContextPrecisionWithoutReference()
 

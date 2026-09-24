@@ -1,7 +1,28 @@
+"""Extract profile fields from the user's message and report what is still missing.
+
+The extraction is best-effort: if the LLM is unavailable or returns nonsense,
+the node still reports completeness from whatever profile it already had, and
+the graph routes to profile_gather to ask the user directly.
+"""
+from __future__ import annotations
+
 import json
-import os
-from groq import Groq
+from typing import Any
+
+from zenic.agent.messages import last_user_message
+from zenic.agent.profile import (
+    ACTIVITY_LEVELS,
+    EXPERIENCE_LEVELS,
+    GOALS,
+    merge_profile,
+    normalize_profile,
+)
 from zenic.agent.state import ZenicState
+from zenic.errors import LLMError
+from zenic.llm import chat_completion_json
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 REQUIRED_FIELDS: dict[str, list[str]] = {
     "calculate":     ["weight_kg", "height_cm", "age", "gender", "activity_level", "goal"],
@@ -10,48 +31,58 @@ REQUIRED_FIELDS: dict[str, list[str]] = {
     "weekly_summary": [],
 }
 
+_EXTRACTION_PROMPT = (
+    "Extract physical and fitness profile data from the user's message. "
+    "Currently known profile: {profile}. "
+    "Return a JSON object containing any NEW or UPDATED fields from this list: "
+    "weight_kg (number), height_cm (number), age (number), "
+    "gender (MUST BE exactly one of: {genders}), "
+    "activity_level (MUST BE exactly one of: {activity_levels}), "
+    "goal (MUST BE exactly one of: {goals}), "
+    "dietary_restrictions (string), "
+    "experience_level (MUST BE exactly one of: {experience_levels}), "
+    "available_days (number), equipment (string). "
+    "If none are found, return {{}}. User message: '{message}'"
+)
+
+
 def run(state: ZenicState) -> dict:
     intent = state.get("intent", "")
-    profile = state.get("user_profile") or {}
+    profile = normalize_profile(state.get("user_profile") or {})
     required = REQUIRED_FIELDS.get(intent, [])
-    
-    if required:
-        # Extract fields from the last message
-        last_msg = ""
-        messages = state.get("messages", [])
-        if messages:
-            last_msg_obj = messages[-1]
-            last_msg = last_msg_obj.get("content", "") if isinstance(last_msg_obj, dict) else getattr(last_msg_obj, "content", "")
-            
-        if last_msg:
-            prompt = (
-                f"Extract physical and fitness profile data from the user's message. "
-                f"Currently known profile: {json.dumps(profile)}. "
-                f"Return a JSON object containing any NEW or UPDATED fields from this list: "
-                f"weight_kg (number), height_cm (number), age (number), gender (string), "
-                f"activity_level (MUST BE exactly one of: 'sedentary', 'light', 'moderate', 'active', 'very_active'), "
-                f"goal (MUST BE exactly one of: 'maintenance', 'cutting', 'bulking'), "
-                f"dietary_restrictions (string), "
-                f"experience_level (string), available_days (number), equipment (string). "
-                f"If none are found, return {{}}. User message: '{last_msg}'"
-            )
-            client = Groq(api_key=os.environ["GROQ_API_KEY"])
-            response = client.chat.completions.create(
-                model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-            try:
-                extracted = json.loads(response.choices[0].message.content)
-                for k, v in extracted.items():
-                    if v and k in REQUIRED_FIELDS["meal_plan"] + REQUIRED_FIELDS["workout_plan"]:
-                        profile[k] = v
-            except:
-                pass
 
-    missing = [f for f in required if not profile.get(f)]
+    message = last_user_message(state)
+    if required and message:
+        extracted = _extract_fields(message, profile)
+        if extracted:
+            profile = merge_profile(profile, extracted)
+
+    missing = [field for field in required if not profile.get(field)]
+    logger.info(
+        "profile checked",
+        extra={"intent": intent, "known_fields": sorted(profile), "missing_fields": missing},
+    )
     return {
         "user_profile": profile,
-        "profile_complete": len(missing) == 0,
+        "profile_complete": not missing,
         "missing_fields": missing,
     }
+
+
+def _extract_fields(message: str, profile: dict[str, Any]) -> dict[str, Any]:
+    """Ask the LLM for profile fields present in ``message``. Never raises."""
+    prompt = _EXTRACTION_PROMPT.format(
+        profile=json.dumps(profile),
+        genders="'male', 'female', 'other'",
+        activity_levels=", ".join(repr(v) for v in ACTIVITY_LEVELS),
+        goals=", ".join(repr(v) for v in GOALS),
+        experience_levels=", ".join(repr(v) for v in EXPERIENCE_LEVELS),
+        message=message,
+    )
+    try:
+        return chat_completion_json(
+            [{"role": "user", "content": prompt}], purpose="profile_extraction"
+        )
+    except LLMError:
+        logger.warning("profile extraction unavailable — continuing with the known profile")
+        return {}

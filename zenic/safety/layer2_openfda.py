@@ -1,43 +1,55 @@
 """
 Layer 2: OpenFDA adverse event lookup.
-Called when a substance passes Layer 1 but the agent wants to verify safety.
-Results are cached — safety status of a substance rarely changes.
+Research utility, not wired into the graph. Adverse-event reports cannot
+establish clinical safety or causality.
 """
-import os
-import httpx
-from functools import lru_cache
+from __future__ import annotations
+
+import re
+
+from zenic.config import get_settings
+from zenic.errors import ExternalAPIError
+from zenic.http_client import get_json
+from zenic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 _BASE_URL = "https://api.fda.gov/drug/event.json"
 
+_MAX_REACTIONS = 5
 
-@lru_cache(maxsize=256)
+
 def check_substance(substance: str) -> dict:
     """
-    Returns {"safe": bool, "adverse_event_count": int, "top_reactions": list}.
-    Raises on network error — caller should handle gracefully.
+    Returns descriptive adverse-event data; never infers clinical safety.
+
+    Raises:
+        ExternalAPIError: if OpenFDA is unreachable — callers should treat an
+            unavailable lookup as "unknown", not as "safe".
     """
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ()-]{0,99}", substance):
+        raise ValueError("Use a plain substance name of at most 100 characters")
     params = {
         "search": f'patient.drug.medicinalproduct:"{substance}"',
         "count": "patient.reaction.reactionmeddrapt.exact",
-        "limit": "5",
+        "limit": str(_MAX_REACTIONS),
     }
-    api_key = os.getenv("OPENFDA_API_KEY")
+    api_key = get_settings().openfda_api_key
     if api_key:
         params["api_key"] = api_key
 
-    response = httpx.get(_BASE_URL, params=params, timeout=10)
-    response.raise_for_status()
-    data = response.json()
+    try:
+        data = get_json(_BASE_URL, params=params, service="OpenFDA")
+    except ExternalAPIError:
+        logger.warning("openfda lookup failed", extra={"service": "OpenFDA"})
+        raise
 
-    results = data.get("results", [])
-    total_events = data.get("meta", {}).get("results", {}).get("total", 0)
-    top_reactions = [r["term"] for r in results[:5]]
-
-    # Heuristic: > 1000 adverse events is a red flag
-    is_safe = total_events < 1000
+    results = data.get("results") or []
+    total_events = int(((data.get("meta") or {}).get("results") or {}).get("total", 0))
+    top_reactions = [r["term"] for r in results[:_MAX_REACTIONS] if isinstance(r, dict) and "term" in r]
 
     return {
-        "safe": is_safe,
+        "safe": None,
         "adverse_event_count": total_events,
         "top_reactions": top_reactions,
     }

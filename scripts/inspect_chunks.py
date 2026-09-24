@@ -1,5 +1,4 @@
 """Eyeball random chunks from each source. Run after any chunking/ingestion change."""
-import random
 from zenic.rag.vector_store import get_vector_store
 
 

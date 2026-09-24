@@ -1,5 +1,5 @@
 """Profile check node — deterministic, no LLM needed."""
-from zenic.agent.nodes.profile_check import run, REQUIRED_FIELDS
+from zenic.agent.nodes.profile_check import run
 
 
 def test_complete_calculate_profile():

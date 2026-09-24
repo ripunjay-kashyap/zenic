@@ -1,79 +1,91 @@
-# Environment
+# ─── Secrets ──────────────────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
 
-# Python
+# ─── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 *.egg-info/
+*.egg
+.eggs/
 dist/
 build/
-.eggs/
-*.egg
 
-# Test / type checking
+# Virtual environments
+.venv/
+venv/
+env/
+
+# ─── Tooling caches ───────────────────────────────────────────────────────────
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-htmlcov/
 .coverage
 coverage.xml
+htmlcov/
 
-# Local vector DB
+# ─── Data ─────────────────────────────────────────────────────────────────────
+# Raw source data is large and re-downloadable, so `data/` is ignored wholesale.
+# NOTE: the pattern must be `data/*`, not `data/` — git cannot re-include a file
+# whose parent *directory* is ignored, which would break the negations below.
+data/*
+# These two are read at runtime and must ship in the container image: the BM25
+# index is built from the corpus at startup, and the weekly-summary workflow
+# reads the tracking file.
+!data/bm25_corpus.json
+!data/mock_weekly.json
+
+# Local vector store (production uses Qdrant Cloud)
 chroma_db/
 
-# Downloaded raw data
-data/
-!data/bm25_corpus.json
-
-# Dev spot-check logs
-dev_log/
-baseline_*.json
-
-# Evaluation outputs
+# ─── Evaluation output ────────────────────────────────────────────────────────
 eval_results/*
 !eval_results/ragas_latest.json
 ragas_results/
 *.ragas.json
+baseline_*.json
+dev_log/
 
-# Jupyter / notebooks
+# ─── Development artifacts ────────────────────────────────────────────────────
+# Iteration screenshots from browser-driven testing. Curated images that the
+# README links to live in assets/ and are tracked.
+test-*.png
+smoke-*.png
+verify-*.png
+landing.png
+page-*.png
+.playwright-mcp/
+
+# Scratch output
+tmp_*.txt
+scripts/test_output.txt
+
+# One-off provider/SDK probes. The rest of scripts/oneoff/ is tracked — see
+# scripts/oneoff/README.md for why.
+scripts/oneoff/test_*.py
+scripts/oneoff/debug_*.py
+
+# ─── Notebooks ────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
 
-# IDE
+# ─── Editors & OS ─────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.code-workspace
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Playwright MCP snapshots & validation screenshots
-.playwright-mcp/
-test-*.png
-
-# Claude Code
+# ─── Assistant / session notes (not for the public repo) ──────────────────────
 CLAUDE.md
-summary.txt
-NEXT_SESSION.md
 .claude/
-
-# One-off probe / debug scripts (not part of the production codebase)
-scripts/test_*.py
-scripts/test_output.txt
-scripts/debug_*.py
-debug_*.py
-
-# Temporary debug output files
-tmp_*.txt
-
-# Internal planning / session notes (not for public repo)
+.gemini/
+summary.txt
 OVERVIEW/
 TESTING/
+
+.agents/
+.codex/
+*.pdf
