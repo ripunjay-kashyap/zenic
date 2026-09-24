@@ -5,8 +5,8 @@ from pathlib import Path
 
 import streamlit as st
 
-# Importing config loads .env (override=True, so it wins over stale shell vars)
-# and validates the configuration before anything else touches it.
+# Importing config loads .env while preserving exported environment variables,
+# then validates the configuration before anything else touches it.
 from zenic.config import get_settings
 from zenic.errors import ConfigError, ZenicError
 from zenic.logging_config import bind_correlation_id, get_logger
@@ -82,6 +82,10 @@ if "pdf_path" not in st.session_state:
     st.session_state.pdf_path = None
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
+if "pending_intent" not in st.session_state:
+    st.session_state.pending_intent = None
+if "pending_missing_fields" not in st.session_state:
+    st.session_state.pending_missing_fields = []
 
 # ---------------------------------------------------------------------------
 # Helpers — Profile display
@@ -229,7 +233,7 @@ def render_metric_cards(results):
                 f"""<div class='metric-card'>
                     <span class='metric-label'>PROTEIN</span>
                     <span class='metric-value'>{int(results['protein_g'])}g</span>
-                    <span class='metric-sub'>DAILY TARGET</span>
+                    <span class='metric-sub'>EST. AT TDEE</span>
                 </div>""",
                 unsafe_allow_html=True,
             )
@@ -380,7 +384,13 @@ def _merge_partial(state: dict, partial) -> None:
             state[key] = value
 
 
-def run_turn(messages: list[dict], user_profile: dict, on_stage=None) -> tuple[dict | None, str | None]:
+def run_turn(
+    messages: list[dict],
+    user_profile: dict,
+    on_stage=None,
+    pending_intent: str | None = None,
+    pending_missing_fields: list[str] | None = None,
+) -> tuple[dict | None, str | None]:
     """Invoke the agent, reporting each stage as it starts.
 
     Streams the graph rather than calling invoke() so the UI can name the stage
@@ -390,6 +400,8 @@ def run_turn(messages: list[dict], user_profile: dict, on_stage=None) -> tuple[d
     state = initial_state(
         [{"role": m["role"], "content": m["content"]} for m in messages[-12:]],
         user_profile,
+        pending_intent,
+        pending_missing_fields,
     )
     try:
         accumulated = dict(state)
@@ -439,7 +451,11 @@ if prompt:
             status.update(label=stage)
 
         final_state, error = run_turn(
-            st.session_state.messages, st.session_state.user_profile, on_stage=report
+            st.session_state.messages,
+            st.session_state.user_profile,
+            on_stage=report,
+            pending_intent=st.session_state.pending_intent,
+            pending_missing_fields=st.session_state.pending_missing_fields,
         )
         status.update(
             label="Couldn't complete that" if error else "Done",
@@ -465,6 +481,13 @@ if prompt:
     st.session_state.messages = st.session_state.messages[-40:]
 
     if final_state:
+        st.session_state.pending_intent = (
+            final_state.get("intent") if final_state.get("awaiting_input") else None
+        )
+        st.session_state.pending_missing_fields = (
+            final_state.get("missing_fields") or []
+            if final_state.get("awaiting_input") else []
+        )
         # The sidebar renders near the top of the script, before this turn ran, so
         # a profile or PDF produced here is only visible after a rerun — without
         # one the sidebar shows stale values for a whole extra turn.

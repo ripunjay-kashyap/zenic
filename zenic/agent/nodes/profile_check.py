@@ -66,6 +66,7 @@ def run(state: ZenicState) -> dict:
         "user_profile": profile,
         "profile_complete": not missing,
         "missing_fields": missing,
+        "awaiting_input": bool(missing),
     }
 
 

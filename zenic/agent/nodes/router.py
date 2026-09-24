@@ -51,21 +51,37 @@ is NOT a factual nutrition/exercise lookup, calculation, plan request, or summar
 
 def run(state: ZenicState) -> dict:
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+    pending_intent = state.get("intent") if state.get("awaiting_input") else None
+    if pending_intent not in {"calculate", "meal_plan", "workout_plan"}:
+        pending_intent = None
+    if pending_intent:
+        requested = ", ".join(state.get("missing_fields") or [])
+        messages.append({
+            "role": "system",
+            "content": (
+                f"The assistant is waiting for profile fields ({requested}) to finish a "
+                f"{pending_intent} request. If the newest message supplies those details "
+                f"or continues that request, classify it as {pending_intent}. "
+                "Only choose another intent if the newest message clearly starts a new task."
+            ),
+        })
     messages.extend(to_openai_messages(state.get("messages", [])))
 
     try:
         result = chat_completion_json(messages, purpose="router")
     except LLMError:
-        logger.warning("intent classification failed — defaulting to %s", DEFAULT_INTENT)
-        return {"intent": DEFAULT_INTENT}
+        fallback = pending_intent or DEFAULT_INTENT
+        logger.warning("intent classification failed — defaulting to %s", fallback)
+        return {"intent": fallback, "awaiting_input": bool(pending_intent)}
 
     intent = result.get("intent")
     if intent not in INTENTS:
+        fallback = pending_intent or DEFAULT_INTENT
         logger.warning(
             "router returned an unknown intent — defaulting",
-            extra={"default": DEFAULT_INTENT},
+            extra={"default": fallback},
         )
-        intent = DEFAULT_INTENT
+        intent = fallback
 
     logger.info("intent classified", extra={"intent": intent})
-    return {"intent": intent}
+    return {"intent": intent, "awaiting_input": bool(pending_intent and intent == pending_intent)}

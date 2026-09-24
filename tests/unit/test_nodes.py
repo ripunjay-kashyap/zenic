@@ -96,6 +96,53 @@ def test_router_accepts_a_valid_intent(monkeypatch):
     assert router.run({"messages": []})["intent"] == "meal_plan"
 
 
+def test_pending_profile_reply_keeps_workflow_when_router_fails(monkeypatch):
+    monkeypatch.setattr(
+        router, "chat_completion_json", lambda *a, **k: (_ for _ in ()).throw(LLMError("down"))
+    )
+    state = initial_state(
+        [{"role": "user", "content": "male and maintenance"}],
+        {"age": 28},
+        pending_intent="calculate",
+        pending_missing_fields=["gender", "goal"],
+    )
+    assert state["awaiting_input"] is True
+    assert state["missing_fields"] == ["gender", "goal"]
+    assert router.run(state) == {"intent": "calculate", "awaiting_input": True}
+
+
+def test_pending_profile_reply_can_start_a_new_request(monkeypatch):
+    def classify(messages, **kwargs):
+        assert "gender, goal" in messages[1]["content"]
+        return {"intent": "nutrition_qa"}
+
+    monkeypatch.setattr(router, "chat_completion_json", classify)
+    state = initial_state(
+        [{"role": "user", "content": "Actually, tell me about vitamin D"}],
+        pending_intent="calculate",
+        pending_missing_fields=["gender", "goal"],
+    )
+    assert router.run(state) == {"intent": "nutrition_qa", "awaiting_input": False}
+
+
+def test_completed_profile_clears_pending_request(monkeypatch):
+    monkeypatch.setattr(
+        profile_check,
+        "chat_completion_json",
+        lambda *a, **k: {"gender": "male", "goal": "maintenance"},
+    )
+    state = initial_state(
+        [{"role": "user", "content": "male and maintenance"}],
+        {"age": 28, "weight_kg": 75, "height_cm": 178, "activity_level": "moderate"},
+        pending_intent="calculate",
+        pending_missing_fields=["gender", "goal"],
+    )
+    result = profile_check.run(state)
+    assert result["profile_complete"] is True
+    assert result["awaiting_input"] is False
+    assert result["missing_fields"] == []
+
+
 # ---------------------------------------------------------------------------
 # profile_check
 # ---------------------------------------------------------------------------
@@ -185,6 +232,13 @@ def test_calculator_names_the_missing_field():
     with pytest.raises(ZenicError, match="activity_level"):
         calculator.run({"user_profile": {k: v for k, v in _COMPLETE_PROFILE.items()
                                          if k != "activity_level"}})
+
+
+def test_calculator_rejects_an_impossible_energy_estimate():
+    profile = dict(_COMPLETE_PROFILE)
+    profile.update(weight_kg=20, height_cm=50, age=120, gender="female")
+    with pytest.raises(ZenicError, match="valid energy estimate"):
+        calculator.run({"user_profile": profile})
 
 
 def test_calculator_preserves_earlier_tool_results():

@@ -455,6 +455,8 @@ _CALCULATE_SYSTEM_PROMPT = (
     "Present the pre-computed results below clearly and concisely. "
     "DO NOT recalculate. DO NOT use different numbers. "
     "Format the results with clear labels (BMR, TDEE, macros). "
+    "The macro estimate is at TDEE, not a prescribed calorie deficit or surplus. "
+    "Do not promise weight loss or gain from these numbers. "
     "Add a brief 1-sentence practical tip at the end."
 )
 

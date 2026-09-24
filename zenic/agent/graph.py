@@ -136,6 +136,8 @@ app = build_graph().compile()
 def initial_state(
     messages: list[dict] | None = None,
     user_profile: dict | None = None,
+    pending_intent: str | None = None,
+    pending_missing_fields: list[str] | None = None,
 ) -> ZenicState:
     """Build a fully-populated starting state.
 
@@ -146,10 +148,10 @@ def initial_state(
     return {
         "messages": messages or [],
         "user_profile": user_profile or {},
-        "intent": "",
+        "intent": pending_intent or "",
         "profile_complete": False,
-        "missing_fields": [],
-        "awaiting_input": False,
+        "missing_fields": pending_missing_fields or [],
+        "awaiting_input": bool(pending_intent),
         "retrieved_context": [],
         "tool_results": {},
         "plan_data": {},

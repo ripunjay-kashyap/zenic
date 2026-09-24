@@ -30,15 +30,22 @@ def test_tdee_invalid_activity():
 
 
 def test_macros_cutting():
-    macros = calculate_macros(2000, "cutting")
-    assert macros["protein_g"] == pytest.approx(2000 * 0.40 / 4, rel=0.01)
-    assert macros["carbs_g"] == pytest.approx(2000 * 0.40 / 4, rel=0.01)
+    macros = calculate_macros(2000, "cutting", 80)
+    assert macros["protein_g"] == pytest.approx(80 * 1.9, rel=0.01)
     assert macros["fat_g"] == pytest.approx(2000 * 0.20 / 9, rel=0.01)
+    assert (macros["protein_g"] * 4 + macros["carbs_g"] * 4 + macros["fat_g"] * 9) == pytest.approx(2000, abs=1)
+
+
+def test_macro_protein_target_stays_inside_displayed_range():
+    for goal in ("maintenance", "cutting", "bulking"):
+        macros = calculate_macros(2677.6, goal, 75)
+        protein = calculate_protein_range(75, goal)
+        assert protein["min_g"] <= macros["protein_g"] <= protein["max_g"]
 
 
 def test_macros_invalid_goal():
     with pytest.raises(ValueError, match="Unknown goal"):
-        calculate_macros(2000, "shredding")
+        calculate_macros(2000, "shredding", 80)
 
 
 def test_protein_range_bulking():

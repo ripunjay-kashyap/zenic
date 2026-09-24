@@ -35,8 +35,13 @@ def run(state: ZenicState) -> dict:
     bmr = calculate_bmr(
         profile["weight_kg"], profile["height_cm"], profile["age"], profile["gender"]
     )
+    if bmr <= 0:
+        raise ZenicError("These profile values do not produce a valid energy estimate. Please check them.")
     tdee = calculate_tdee(bmr, profile["activity_level"])
-    macros = calculate_macros(tdee, profile["goal"])
+    try:
+        macros = calculate_macros(tdee, profile["goal"], profile["weight_kg"])
+    except ValueError as exc:
+        raise ZenicError("These profile values do not produce valid macro targets. Please check them.") from exc
     protein = calculate_protein_range(profile["weight_kg"], profile["goal"])
 
     logger.info("metrics calculated")

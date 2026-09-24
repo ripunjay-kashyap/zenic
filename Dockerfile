@@ -33,6 +33,9 @@ RUN pip install --upgrade pip && \
 # Kept as its own layer so it is not invalidated by application code changes.
 RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; SentenceTransformer('BAAI/bge-small-en-v1.5'); CrossEncoder('BAAI/bge-reranker-base')"
 
+# The models are baked into the image; avoid Hub probes during live requests.
+ENV HF_HUB_OFFLINE=1
+
 # App code, plus data/bm25_corpus.json and data/mock_weekly.json, which are read
 # at startup and by the weekly-summary workflow respectively.
 COPY --chown=user . .
@@ -45,4 +48,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
 
 CMD ["streamlit", "run", "zenic/ui/app.py", \
      "--server.port=7860", "--server.address=0.0.0.0", \
-     "--server.headless=true", "--browser.gatherUsageStats=false"]
+     "--server.headless=true", "--server.fileWatcherType=none", \
+     "--browser.gatherUsageStats=false"]

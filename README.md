@@ -55,10 +55,11 @@ flowchart LR
 - **Orchestration:** six intents: nutrition Q&A, calculations, meal plans,
   workout plans, demonstration weekly summaries, and general conversation.
   Unknown router outputs require retrieval rather than unrestricted health chat.
-- **Calculations:** Mifflin–St Jeor BMR, activity-based TDEE, macro splits, and
-  protein ranges. Numeric results are deterministic; their prose presentation
-  uses the model. Adult-only equation use and explicit physiology coefficients
-  prevent silently applying an inappropriate formula.
+- **Calculations:** Mifflin–St Jeor BMR, activity-based TDEE, and
+  weight-based protein and macronutrient estimates at TDEE. The calculations
+  are deterministic; the model presents the results. Adult-only equation use
+  and explicit physiology coefficients prevent silently applying an
+  inappropriate formula.
 - **Resilience:** timeouts, bounded retries, safe errors, structured logs with
   correlation IDs, and no health query or profile values in application logs.
 
@@ -92,12 +93,15 @@ Build a local vector index from the same corpus before starting:
 ```bash
 ENV=development PYTHONPATH=. python scripts/index_corpus.py
 PYTHONPATH=. python scripts/healthcheck.py --llm
-streamlit run zenic/ui/app.py
+streamlit run zenic/ui/app.py --server.fileWatcherType none
 ```
 
-Embedding and reranking models download on first use. CPU reranking can take tens
-of seconds. `MULTI_QUERY_ENABLED=false` avoids query-expansion model calls when
-latency or provider budget matters. It can reduce recall.
+Embedding and reranking models download on first use. Once cached, set
+`HF_HUB_OFFLINE=1` to avoid Hub probes. Disabling Streamlit's file watcher
+avoids repeated scans of Transformers modules; restart the app after code edits.
+CPU reranking can take tens of seconds. `MULTI_QUERY_ENABLED=false` avoids
+query-expansion model calls when latency or provider budget matters. It can
+reduce recall.
 
 ## Configuration
 
