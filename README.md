@@ -1,94 +1,70 @@
-# Zenic — Health & Nutrition RAG Assistant
+# Zenic
 
-An evidence-focused nutrition and fitness assistant built with Python, LangGraph,
-a lightweight HTML/CSS/JavaScript frontend, a same-origin Starlette API, hybrid
-retrieval, and Groq. It combines a curated knowledge base with deterministic
-calculators and downloadable educational plans.
+Zenic answers nutrition and exercise questions using a source-backed knowledge
+base. It also calculates BMR and TDEE from a validated adult profile and creates
+educational meal and workout PDFs.
 
-![Zenic interface](assets/ui_landing.png)
+Built with Python 3.12, LangGraph, Starlette, Groq, BGE embeddings and reranking,
+and a plain HTML/CSS/JavaScript frontend.
 
-[See the cited answer view](assets/ui_chat.png).
+![A Zenic answer with a linked source](assets/ui_chat.png)
 
-This is an educational portfolio application, not a medical device or a service
-for clinical decisions. See [Tests and evaluation](#tests-and-evaluation) for the
-current validation scope and limits.
+[See the landing screen](assets/ui_landing.png)
 
-## Architecture
+## What it does
+
+- Answers questions from 10,201 bundled passages covering NIH Office of Dietary
+  Supplements, USDA, dietary guidelines, ISSN, and wger material.
+- Handles follow-up questions, shows its sources, and abstains when retrieval
+  finds no usable evidence.
+- Routes calculation and plan requests through profile validation. BMR, TDEE,
+  and macro estimates are calculated in code; the model explains the result.
+- Generates session-scoped PDFs for meal plans, workout plans, and a weekly
+  summary. The weekly data is synthetic demo data.
+
+## How the RAG path works
 
 ```mermaid
 flowchart LR
-    UI[Browser UI] --> API[Streaming web API]
-    API --> Safety[Input bounds and safety filter]
-    Safety --> Router[Intent router]
-    Router --> RAG[Nutrition and exercise Q&A]
-    RAG --> Expand[Query expansion]
-    Expand --> Hybrid[Vector search + BM25]
-    Hybrid --> Rank[Cross encoder reranking]
-    Rank --> Evidence[Evidence threshold and context budget]
-    Evidence --> Answer[Cited answer or abstention]
-    Router --> Profile[Validated profile]
-    Profile --> Calc[Deterministic calculations]
-    Profile --> Plans[Food or exercise retrieval]
-    Calc --> Plans
-    Plans --> PDF[Plan composition and PDF]
-    Router --> Demo[Synthetic weekly summary]
+    Browser --> API[Starlette API]
+    API --> Router[LangGraph router]
+    Router --> Search[Vector search + BM25]
+    Search --> Fusion[Rank fusion]
+    Fusion --> Rerank[Cross-encoder rerank]
+    Rerank --> Gate[Evidence gate]
+    Gate --> Answer[Cited answer or abstention]
+    Router --> Tools[Validated profile + calculators / plans]
 ```
 
-- **Knowledge:** 10,201 bundled passages from NIH ODS, USDA, wger, dietary
-  guidelines, and ISSN. Three manually authored summaries are explicitly marked
-  in their corpus metadata.
-- **Retrieval:** BGE-small embeddings, local Chroma or production Qdrant, BM25,
-  reciprocal rank fusion, fair candidate allocation per source, deduplication by chunk identity, and BGE cross encoder
-  reranking. Query embeddings are batched; models and clients are reused. Age-specific
-  nutrient intake lookups focus the matching table row during reranking.
-- **Grounding:** only passages scoring at least 0.5 enter factual generation.
-  Whole passages fit within a 16,000-character budget. Missing evidence produces
-  a static abstention. Live USDA fallback results are reranked too.
-- **Citations:** evidence IDs such as `[1]` map to supplied source records.
-  Missing or out-of-range IDs cause abstention. This checks citation structure,
-  not whether every claim is semantically entailed by its cited passage. NIH ODS
-  citations link to their validated publisher URLs.
-- **Orchestration:** six intents: nutrition Q&A, calculations, meal plans,
-  workout plans, demonstration weekly summaries, and general conversation.
-  Unknown router outputs require retrieval rather than unrestricted health chat.
-- **Calculations:** Mifflin–St Jeor BMR, activity-based TDEE, and
-  weight-based protein and macronutrient estimates at TDEE. The calculations
-  are deterministic; the model presents the results. Adult-only equation use
-  and explicit physiology coefficients prevent silently applying an
-  inappropriate formula.
-- **Resilience:** timeouts, bounded retries, safe errors, structured logs with
-  correlation IDs, and no health query or profile values in application logs.
-- **Interface:** a responsive, dependency-free browser UI. The API streams stage
-  updates while LangGraph runs, keeps conversations in short-lived server-side
-  sessions, and restricts PDF downloads to the session that created them.
-  Referential health follow-ups are rewritten into standalone retrieval questions.
+The vector index uses BGE-small embeddings in local Chroma or production Qdrant.
+Reciprocal rank fusion combines vector and BM25 results before a cross-encoder
+reranks a bounded candidate set. Age-specific nutrient questions focus the
+matching table row during ranking, and referential follow-ups are rewritten as
+standalone searches.
 
-The candidate merge uses reciprocal rank fusion so raw BM25 scores cannot overwhelm
-vector similarities. Each source receives a share of the candidate budget before
-unused slots are filled by rank; the cross encoder makes the final relevance judgment.
+Generation receives whole passages within a 16,000-character context budget.
+Passages below the relevance threshold are excluded. The answer must cite
+supplied source IDs such as `[1]`; missing or invalid IDs cause abstention. NIH
+citations include validated publisher links. Citation checks verify that a source
+was supplied, but cannot prove that every generated claim follows from it.
+
+Three passages are manually authored summaries; their corpus metadata marks
+them as synthetic.
 
 ## Run locally
 
-Use **Python 3.12**. The checked lock and container target Linux CPU execution.
+Use Python 3.12 on Linux CPU. The BM25 corpus is included; the vector index is
+built locally.
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.lock.txt
-pip check
 cp .env.example .env
 ```
 
-Set `GROQ_API_KEY` and `ENV=development`. The default model is
-`openai/gpt-oss-20b`; structured plans use `openai/gpt-oss-120b`, which handled
-the nested plan schema more reliably in live validation. Set `GROQ_MODEL` and
-`GROQ_PLAN_MODEL` to choose available alternatives. Plan output is validated
-locally; supported models also use constrained JSON schemas. Exported environment
-variables take precedence over `.env`.
-
-The BM25 corpus ships with the repository, but the vector database does not.
-Build a local vector index from the same corpus before starting:
+Set `GROQ_API_KEY` in `.env` and leave `ENV=development` for local Chroma. Then:
 
 ```bash
 ENV=development PYTHONPATH=. python scripts/index_corpus.py
@@ -96,94 +72,63 @@ PYTHONPATH=. python scripts/healthcheck.py --llm
 PYTHONPATH=. uvicorn zenic.web.app:app --host 127.0.0.1 --port 7860
 ```
 
-Embedding and reranking models download on first use. Once cached, set
-`HF_HUB_OFFLINE=1` to avoid Hub probes.
+Open <http://127.0.0.1:7860>. The embedding and reranking models download on
+first use. For production Qdrant, set `ENV=production`, `QDRANT_URL`, and
+`QDRANT_API_KEY`, then index the same corpus into that collection. See
+[.env.example](.env.example) for model and retrieval settings.
 
-Open <http://127.0.0.1:7860>. The production vector store requires `ENV=production`
-and a populated Qdrant collection. The browser UI shows each graph stage and
-the completed turn time. CPU reranking can still take tens of seconds;
-`MULTI_QUERY_ENABLED=false` avoids query-expansion calls at a possible recall cost.
+The UI streams progress while a turn runs. In local CPU checks, cited answers
+took roughly 10–29 seconds depending on retrieval and provider latency. These
+are individual observations, not a latency guarantee.
 
-## Configuration
-
-See [.env.example](.env.example) for all defaults and supported tuning knobs.
-
-| Variable | Purpose |
-| --- | --- |
-| `GROQ_API_KEY` | Required for routing and generation |
-| `GROQ_MODEL`, `GROQ_PLAN_MODEL` | Chat/routing model and structured-plan model |
-| `ENV` | `development` uses Chroma; `production` uses Qdrant |
-| `QDRANT_URL`, `QDRANT_API_KEY` | Required in production; HTTPS only |
-| `USDA_API_KEY` | Optional food-data fallback |
-| `GOOGLE_API_KEY` | Optional RAGAS evaluation |
-| `CHROMA_PATH`, `BM25_CORPUS_PATH` | Local persistence locations |
-| `MULTI_QUERY_ENABLED` | Enable query expansion, default true |
-| `RETRIEVAL_CANDIDATE_POOL` | Passages reranked per turn, default 12 |
-| `RETRIEVAL_TOP_K` | Final passages, default 7 |
-| `RERANK_BATCH_SIZE` | Small length-sorted batches, default 4 |
-| `LOG_FORMAT`, `LOG_LEVEL` | Structured or text diagnostics |
-
-The server keeps chat and profile state in memory for up to 30 minutes, keyed by
-an HTTP-only, same-site cookie. It accepts at most two active graph turns per
-process to protect the CPU demo from overload. It does not persist conversations across server
-restarts. Prompts and relevant profile fields are sent to the configured model
-provider; food fallback queries are sent to USDA. Do not enter identifying or
-sensitive medical information.
-Weekly summaries use bundled **synthetic demonstration data**, not user tracking.
-
-## Tests and evaluation
+## Validation
 
 ```bash
 ruff check .
 pytest -m 'not integration' -q
-pytest -m 'integration' -q  # configured providers and populated index required
+pytest -m 'integration' -q  # needs live credentials and a populated index
 PYTHONPATH=. python scripts/retrieval_spot_check.py
-PYTHONPATH=. python scripts/ragas_eval.py
+PYTHONPATH=. python scripts/rag_vs_api_check.py
 ```
 
-Offline tests cover retrieval merging, reranking, grounding, citation rejection,
-configuration, HTTP failure handling, profiles, calculators, graph routing, web
-sessions, PDF access, and safety boundaries. They replace external services;
-they do not establish live service health or clinical accuracy.
+At the last release check, 246 offline tests passed. Ten live retrieval checks
+and a six-case RAG-versus-API routing sweep also passed; two API-routing cases
+were intentionally skipped in the retrieval suite because the separate sweep
+covers them. Desktop and mobile browser flows and the production container were
+smoke-tested. Optional RAGAS evaluation is available through
+`scripts/ragas_eval.py`; generated scores are not committed because they depend
+on the model, index, and provider state.
 
-The current release passed 246 offline tests, 10 live retrieval spot checks, and
-six live RAG-versus-API routing checks. Desktop and mobile browser flows and the
-production container were also smoke-tested. These are functional checks; the
-small retrieval benchmark is not a clinical validation dataset. Evaluation
-output is generated locally and is not committed because scores depend on the
-model, prompts, index, and provider state at run time.
+These checks establish software behavior, not clinical accuracy. The test
+queries and weekly summary use synthetic data.
 
-## Deployment
+## Deployment and limits
+
+The Docker image installs a smaller pinned runtime lock, preloads the embedding
+models, and runs as a non-root user. With a populated Qdrant collection and
+configured secrets:
 
 ```bash
-# Index the same bundled corpus in an existing configured Qdrant collection.
-ENV=production PYTHONPATH=. python scripts/index_corpus.py
-ENV=production PYTHONPATH=. python scripts/healthcheck.py --llm
-
 docker build -t zenic .
 docker run --rm --env-file .env -p 7860:7860 zenic
 ```
 
-The image runs as a non-root user, excludes local secrets and raw documents,
-installs only pinned production dependencies, and preloads embedding models.
-The development and evaluation packages remain in the full lock. Its HTTP healthcheck
-checks web server configuration; `scripts/healthcheck.py --llm` checks service readiness.
+The repository does not provide account authentication or a distributed rate
+limiter. Put any public deployment behind authenticated access, TLS, request
+limits, a provider spending cap, and a retention policy. Browser sessions are
+kept in memory for up to 30 minutes; they do not survive a server restart.
+Prompts and relevant profile fields are sent to the configured model provider.
+Do not enter identifying or sensitive medical information.
 
-**Before internet exposure:** deploy behind authenticated access with request and
-concurrency limits, TLS, provider spending limits, and a retention policy. This
-repository does not implement account authentication or a distributed rate limiter.
-Keep the browser and API on the same origin. Do not expose a Chroma server; the
-development backend uses an embedded database only.
+Zenic is an educational project, not a medical device or a tool for clinical
+decisions. See [SECURITY.md](SECURITY.md) for trust boundaries and
+[CONTRIBUTING.md](CONTRIBUTING.md) for development checks.
 
-## Repository map
+## Repository guide
 
-- `zenic/rag/`: retrieval, generation, vector adapters, and ingestion
-- `zenic/agent/`: graph, nodes, profile validation, and deterministic tools
-- `zenic/safety/`: keyword filter and standalone OpenFDA research utility
-- `zenic/web/`: browser UI and streaming API
-- `tests/`: offline regression and opt-in live integration checks
-- `scripts/`: corpus indexing, ingestion, migration, health and evaluation tools
-- `data/`: curated corpus and synthetic demonstration data
-- `eval_data/`: reproducible retrieval evaluation questions
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+- `zenic/rag/` — retrieval, vector adapters, and ingestion
+- `zenic/agent/` — LangGraph routing, safety checks, calculations, and plans
+- `zenic/web/` — browser UI and streaming API
+- `data/` and `eval_data/` — bundled corpus, synthetic weekly data, and
+  evaluation questions
+- `tests/` and `scripts/` — regression checks, indexing, and evaluation tools

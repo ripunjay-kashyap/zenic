@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zenic"
 version = "1.0.0"
-description = "Health and nutrition AI assistant: advanced RAG, agentic orchestration, and evaluation."
+description = "Source-backed nutrition assistant with hybrid retrieval, calculations, and a browser UI."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -20,8 +20,7 @@ include = ["zenic*"]
 # Tests
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
-# Restricted to tests/ so that the one-off probe scripts under scripts/ — which
-# are named test_*.py but are not tests — are never collected.
+# Collect project tests from tests/ only; scripts are operator commands.
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
@@ -82,8 +81,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# One-off dev/probe scripts: printing is their output, and several must set
-# environment variables before importing zenic, so imports cannot come first.
+# Command-line scripts print results and may configure the environment before
+# importing application modules.
 "scripts/*" = ["T20", "E402", "SIM115"]
 "tests/*" = ["T20", "E402"]
 
