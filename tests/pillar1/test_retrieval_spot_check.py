@@ -80,7 +80,9 @@ def test_retrieval_spot_check(case, pipeline):
 
     query = case["query"]
     variants = generate_multi_queries(query, n=2)   # n=2 to stay fast
-    candidates = hybrid_search(variants, top_k=20)
+    from zenic.config import get_settings
+
+    candidates = hybrid_search(variants, top_k=get_settings().retrieval_candidate_pool)
     chunks = rerank(query, candidates, top_k=7)
 
     # For p1_012 (graceful failure) — just check retrieval doesn't crash

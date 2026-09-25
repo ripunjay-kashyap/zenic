@@ -33,6 +33,25 @@ def test_cited_answer_has_source_and_disclaimer(monkeypatch):
     assert "not a diagnosis" in answer
 
 
+def test_specific_nih_evidence_exposes_publisher_link_but_rejects_unsafe_url(monkeypatch):
+    passage = chunk("19–70 years: 15 mcg (600 IU)")
+    passage["metadata"] = {
+        "source": "NIH_ODS", "nutrient_name": "Vitamin D - Health Professional",
+        "url": "https://ods.od.nih.gov/factsheets/VitaminD-HealthProfessional",
+    }
+    messages = pipeline._build_generation_messages("RDA for adults 19 to 70?", [passage], "nutrition_qa", None)
+    record = json.loads(messages[1]["content"].split("\n", 1)[1].split("\n\nQuestion:", 1)[0])[0]
+    assert record["title"] == "Vitamin D - Health Professional"
+    assert record["url"] == passage["metadata"]["url"]
+    monkeypatch.setattr(pipeline, "chat_completion", lambda *a, **k: "15 mcg (600 IU) [1].")
+    assert record["url"] in pipeline.generate("question", [passage], "nutrition_qa")
+
+    passage["metadata"]["url"] = "https://ods.od.nih.gov.evil.test/factsheets/VitaminD"
+    assert pipeline._evidence_url(passage) is None
+    passage["metadata"]["url"] = "https://ods.od.nih.gov:invalid/factsheets/VitaminD"
+    assert pipeline._evidence_url(passage) is None
+
+
 def test_context_is_bounded_without_cutting_passages():
     evidence = [chunk("a" * 9000), chunk("b" * 9000), chunk("c" * 1000)]
     selected = pipeline.evidence_chunks(evidence)

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071713">
+  <meta name="description" content="Zenic is an educational health and nutrition assistant grounded in curated sources.">
+  <title>Zenic — Evidence, made useful</title>
+  <link rel="icon" href="/static/favicon.svg?v=2" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css?v=2">
+  <script src="/static/app.js?v=2" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Your workspace">
+      <div class="sidebar-top">
+        <a class="brand" href="/" aria-label="Zenic home">
+          <span class="brand-icon" aria-hidden="true">✳</span>
+          <span class="brand-name">zenic<span class="brand-period">.</span></span>
+        </a>
+        <button class="icon-button sidebar-close" id="close-sidebar" type="button" aria-label="Close sidebar">×</button>
+      </div>
+
+      <div class="sidebar-label">YOUR WORKSPACE</div>
+      <button class="new-chat" id="new-chat" type="button"><span aria-hidden="true">＋</span> New conversation</button>
+
+      <div class="sidebar-section">
+        <div class="section-heading"><span>Profile</span><span id="profile-count">0 of 6</span></div>
+        <div class="profile-progress" role="progressbar" aria-label="Profile completeness" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="profile-progress"><span id="profile-fill"></span></div>
+        <p class="profile-hint" id="profile-hint">Your profile builds naturally as we talk.</p>
+        <dl class="profile-fields" id="profile-fields"></dl>
+      </div>
+
+      <div class="sidebar-section plan-section" id="plan-section" hidden>
+        <div class="section-heading"><span>Your plan</span></div>
+        <a class="download-link" href="/api/plan" download>↓ <span>Download PDF</span></a>
+      </div>
+
+      <div class="sidebar-bottom">
+        <div class="source-note"><span class="source-dot"></span> Grounded in curated sources</div>
+        <p>Educational information only. Not a diagnosis or personalized medical advice. Avoid entering sensitive medical details.</p>
+      </div>
+    </aside>
+
+    <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+    <main class="main-panel" id="main-panel">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="icon-button menu-button" id="open-sidebar" type="button" aria-label="Open sidebar" aria-expanded="false" aria-controls="sidebar">☰</button>
+          <span class="topbar-title">Zenic <span class="topbar-divider">/</span> Assistant</span>
+        </div>
+        <div class="topbar-status"><span></span> EVIDENCE ONLINE</div>
+      </header>
+
+      <div class="content-wrap">
+        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+          <div class="orb-scene" aria-hidden="true"><div class="orb-halo"></div><div class="orb"></div><div class="orb-core">✳</div></div>
+          <div class="eyebrow"><span></span> YOUR EVIDENCE COMPANION</div>
+          <h1 id="welcome-title">Health questions,<br><em>clearer answers.</em></h1>
+          <p class="welcome-copy">Explore nutrition and training with answers grounded in trusted sources. Build a plan around your goals, one question at a time.</p>
+          <div class="suggestions-heading">TRY A STARTING POINT <span>↘</span></div>
+          <div class="suggestions" id="suggestions">
+            <button class="suggestion" type="button" data-prompt="What does the ISSN recommend for protein intake for athletes?"><span class="suggestion-icon">◌</span><span><strong>Explore the research</strong><small>Protein intake for athletes</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" type="button" data-prompt="Calculate my TDEE — I'm 28, 75 kg, 178 cm, moderately active"><span class="suggestion-icon">◇</span><span><strong>Find your numbers</strong><small>Calculate daily energy needs</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" type="button" data-prompt="Give me my weekly summary"><span class="suggestion-icon">▤</span><span><strong>See a sample report</strong><small>Explore a synthetic weekly summary</small></span><span class="suggestion-arrow">↗</span></button>
+            <button class="suggestion" type="button" data-prompt="Create a 7-day meal plan for me"><span class="suggestion-icon">✳</span><span><strong>Build a plan</strong><small>Get a tailored meal outline</small></span><span class="suggestion-arrow">↗</span></button>
+          </div>
+        </section>
+
+        <section class="conversation" id="conversation" aria-label="Conversation" aria-live="polite" hidden></section>
+        <div class="activity" id="activity" role="status" aria-live="polite" hidden>
+          <div class="activity-spinner" aria-hidden="true"></div>
+          <span id="activity-label">Checking your message</span>
+          <span class="activity-clock" id="activity-clock">0s</span>
+        </div>
+      </div>
+
+      <div class="composer-wrap">
+        <form class="composer" id="chat-form">
+          <label class="sr-only" for="message-input">Message Zenic</label>
+          <textarea id="message-input" rows="1" maxlength="4000" placeholder="Ask about nutrition, training, or your next plan…" required></textarea>
+          <button id="send-button" type="submit" aria-label="Send message">↑</button>
+        </form>
+        <p class="composer-note">Zenic can make mistakes. Check cited sources and speak with a professional for medical decisions.</p>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,7 +1,6 @@
 FROM python:3.12-slim
 
-# HF Spaces runs the container as UID 1000 — create that user up front and never
-# run as root beyond the package install below.
+# Run as a dedicated non-root user.
 RUN useradd -m -u 1000 user
 
 ENV HOME=/home/user \
@@ -22,12 +21,13 @@ USER user
 WORKDIR $HOME/app
 
 # Install CPU-only torch first (much smaller image), then the pinned tree.
-# requirements.lock.txt is used rather than requirements.txt so an image
-# rebuilt months from now resolves to exactly the versions that were tested.
-COPY --chown=user requirements.lock.txt .
+# The production lock excludes indexing/evaluation dependencies and their
+# documented advisories. CPU PyTorch is installed separately.
+COPY --chown=user requirements.runtime.lock.txt .
 RUN pip install --upgrade pip && \
     pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.lock.txt
+    pip install -r requirements.runtime.lock.txt && \
+    pip check
 
 # Pre-bake the embedding + reranker models into the image (no cold-start download).
 # Kept as its own layer so it is not invalidated by application code changes.
@@ -42,11 +42,8 @@ COPY --chown=user . .
 
 EXPOSE 7860
 
-# Streamlit's own endpoint — reports unhealthy if the server stops responding.
+# The API endpoint reports unhealthy if the server is unconfigured.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-    CMD curl -fsS http://localhost:7860/_stcore/health || exit 1
+    CMD curl -fsS http://localhost:7860/api/health || exit 1
 
-CMD ["streamlit", "run", "zenic/ui/app.py", \
-     "--server.port=7860", "--server.address=0.0.0.0", \
-     "--server.headless=true", "--server.fileWatcherType=none", \
-     "--browser.gatherUsageStats=false"]
+CMD ["uvicorn", "zenic.web.app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]

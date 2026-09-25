@@ -18,6 +18,8 @@ _CHUNK_KEYS = frozenset({"exercise_chunks", "food_chunks", "weekly_data", "weekl
 
 def run(state: ZenicState) -> dict:
     query = last_user_message(state)
+    if state.get("intent") == "nutrition_qa":
+        query = state.get("retrieval_query") or query
     context = list(state.get("retrieved_context") or [])
 
     tool_results = {

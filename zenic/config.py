@@ -210,7 +210,7 @@ def _build_settings() -> Settings:
         bm25_corpus_path=Path(
             _env_str("BM25_CORPUS_PATH", str(PROJECT_ROOT / "data" / "bm25_corpus.json"))
         ),
-        retrieval_candidate_pool=_env_int("RETRIEVAL_CANDIDATE_POOL", 30),
+        retrieval_candidate_pool=_env_int("RETRIEVAL_CANDIDATE_POOL", 12),
         retrieval_max_per_source=_env_int("RETRIEVAL_MAX_PER_SOURCE", 12),
         retrieval_top_k=_env_int("RETRIEVAL_TOP_K", 7),
         # Small batches minimise padding waste in the cross-encoder — see

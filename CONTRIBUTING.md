@@ -20,16 +20,21 @@ and limitations rather than publishing scores without context.
 ## Dependency updates
 
 `requirements.txt` describes direct dependencies and security minimums.
-`requirements.lock.txt` is the resolved Python 3.12 package set used by CI and the
-container. CPU PyTorch 2.13.0 is installed separately from its wheel index.
+`requirements.lock.txt` is the full resolved Python 3.12 package set used by CI.
+`requirements.runtime.txt` and `requirements.runtime.lock.txt` are the smaller
+production web set used by Docker. CPU PyTorch 2.13.0 is installed separately
+from its wheel index.
 
 To regenerate, resolve in a disposable Python 3.12 environment using
 `uv pip compile requirements.txt --python-version 3.12 --output-file resolved.txt`.
-Remove the resolved `torch`, `triton`, `nvidia-*`, and `cuda-*` entries from the
-lock because CPU PyTorch is supplied separately. Install that lock after the
-pinned CPU wheel, run `pip check`, audit it with `pip-audit`, and run the tests.
-Remove `resolved.txt` after the refresh. Do not use an arbitrary `pip freeze`
-from an unrelated development environment.
+Resolve the production set with
+`uv pip compile requirements.runtime.txt --constraint requirements.lock.txt --python-version 3.12`.
+Remove resolved `torch`, `triton`, `nvidia-*`, and `cuda-*` entries from both locks
+because CPU PyTorch is supplied separately. Ensure every production package
+is present at the same version in the full lock. Install each lock after the
+pinned CPU wheel, run `pip check`, audit both with `pip-audit`, and run the tests.
+Remove temporary resolved files. Do not use an arbitrary `pip freeze` from an
+unrelated development environment.
 
 ## Code and data conventions
 

@@ -303,6 +303,25 @@ def test_good_retrieval_does_not_call_the_live_api(monkeypatch):
     assert "api_fallback_used" not in (result.get("tool_results") or {})
 
 
+def test_referential_follow_up_is_rewritten_before_retrieval(monkeypatch):
+    previous = "According to NIH, what is vitamin D intake for ages 19 to 70?"
+    latest = "What does that same fact sheet say for people older than 70?"
+    standalone = "What is NIH vitamin D intake for adults older than 70?"
+    seen = []
+    monkeypatch.setattr(rag_retrieval, "chat_completion", lambda *a, **k: standalone)
+    monkeypatch.setattr(rag_retrieval, "retrieve", lambda query: seen.append(query) or [
+        {"text": "20 mcg (800 IU)", "metadata": {"source": "NIH_ODS"}, "rerank_score": 5.0}
+    ])
+    state = {"messages": [
+        {"role": "user", "content": previous},
+        {"role": "assistant", "content": "15 mcg (600 IU)"},
+        {"role": "user", "content": latest},
+    ]}
+    result = rag_retrieval.run(state)
+    assert seen == [standalone]
+    assert result["retrieval_query"] == standalone
+
+
 def test_poor_retrieval_falls_back_to_the_live_api(monkeypatch):
     monkeypatch.setattr(
         rag_retrieval, "retrieve", lambda q: [{"text": "t", "metadata": {}, "rerank_score": -2.0}]

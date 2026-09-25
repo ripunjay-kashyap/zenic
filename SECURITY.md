@@ -5,7 +5,7 @@ channel when enabled, rather than posting credentials or exploit details publicl
 
 ## Trust boundaries
 
-- Secrets come from environment configuration. `.env`, Streamlit secrets, raw
+- Secrets come from environment configuration. `.env`, raw
   source documents, vector databases, generated PDFs, and local agent settings
   are excluded from Git and container build context. Secret fields are omitted
   from settings repr; `Settings.redacted()` reports presence only.
@@ -18,10 +18,13 @@ channel when enabled, rather than posting credentials or exploit details publicl
 - Health questions and profile fields are sent to Groq; optional food searches
   go to USDA. Do not submit identifying or sensitive health information. The app
   is not designed for regulated health records.
-- HTML sidebar values are escaped. Model output is rendered as Streamlit text or
-  Markdown without raw HTML. Model calls cannot execute code or select file paths.
-- User messages are limited to 4,000 characters; model history and completion
-  sizes are bounded. HTTP calls have timeouts and a single bounded retry budget.
+- Browser text is rendered with DOM text nodes; only a small set of formatting
+  elements and validated NIH links are created. Model calls cannot execute code
+  or select file paths. The web API serves only same-origin assets, applies a
+  restrictive content security policy, and uses HTTP-only same-site cookies.
+- User messages are limited to 4,000 characters and 5,000 request bytes; model
+  history and completion sizes are bounded. HTTP calls have timeouts and a
+  single bounded retry budget.
 - Ingestion is an operator CLI, not an upload endpoint. Only ingest documents
   from reviewed sources into private, trusted filesystem paths. PDF parsing is
   not a sandbox: use a disposable, resource-limited environment for new PDFs.
@@ -29,6 +32,8 @@ channel when enabled, rather than posting credentials or exploit details publicl
   instructions, filtered for relevance, and bounded without truncating tables.
   Missing evidence and invalid citation IDs cause abstention. These controls
   reduce prompt-injection risk; they do not guarantee semantic faithfulness.
+  Age-specific intake questions prioritize matching source table rows and
+  distinguish recommended intakes from upper safety limits.
 - Safety regexes are a limited first layer. System prompts forbid diagnosis and
   prescribing, but adversarial model behavior remains possible. The OpenFDA
   utility is not part of the graph and returns `safe=None`: adverse-event counts
@@ -40,11 +45,15 @@ channel when enabled, rather than posting credentials or exploit details publicl
   rather than prompts, profile measurements, provider bodies, or generated text.
   Keep provider tracing disabled and restrict access to deployment logs.
 
-## Dependency audit — 2026-09-23
+## Dependency audit — 2026-09-24
 
-The repaired lock upgrades vulnerable GitPython, h2, pypdf, and setuptools.
-`pip-audit` still reports nine findings (including duplicate advisory entries)
-in three packages for which the database lists no fixed version:
+The production container installs `requirements.runtime.lock.txt`; a current
+`pip-audit` run found **no known vulnerabilities** in that lock. The separately
+installed CPU PyTorch 2.13.0 was audited by package version with no known
+findings. The full
+development/evaluation lock still reports nine findings (including duplicate
+advisory entries) in three packages for which the database lists no fixed
+version:
 
 | Package | Advisory IDs | Exposure and required restriction |
 | --- | --- | --- |
@@ -52,7 +61,8 @@ in three packages for which the database lists no fixed version:
 | diskcache 5.6.3 | PYSEC-2026-2447 | Pickle deserialization if an attacker can write cache files. Do not share writable cache directories with untrusted users; Zenic does not load user-supplied caches. |
 | RAGAS 0.4.3 | PYSEC-2026-3046 | SSRF in multimodal evaluation context handling. RAGAS is used by an operator-only text evaluation script; never expose it as an API or evaluate untrusted multimodal contexts/URLs. |
 
-These are documented residual risks, not clean audit results. Re-run the audit on
+None of these three packages is in the production lock. They remain documented
+risks in local development and operator evaluation. Re-run both audits on
 updates and re-evaluate applicability before enabling any affected feature.
 
 ## Rotation and incident response

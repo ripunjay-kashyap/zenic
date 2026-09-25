@@ -1,5 +1,9 @@
 # Release audit — 2026-09-24
 
+This records the original Streamlit release before the browser UI migration.
+See [the current web demo audit](web-demo-audit.md) for the new interface and
+latency measurements.
+
 ## Decision
 
 The original Qdrant connectivity blocker was resolved on September 24 after the

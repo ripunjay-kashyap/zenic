@@ -6,8 +6,8 @@ Two output formats, selected by ``LOG_FORMAT``:
 
 Every log record can carry a correlation id so a single user turn can be traced
 across the router, retrieval, and generation nodes. Set it once per request with
-:func:`bind_correlation_id`; it propagates via a ContextVar, so it survives the
-thread hops LangGraph and Streamlit make.
+:func:`bind_correlation_id`; it propagates via a ContextVar in the worker running
+each graph turn.
 """
 from __future__ import annotations
 

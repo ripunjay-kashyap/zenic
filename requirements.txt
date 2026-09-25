@@ -1,9 +1,9 @@
 # Direct dependencies, with upper bounds so a major release cannot break a
 # rebuild unattended. For a byte-identical environment install
 # requirements.lock.txt instead — that file pins the full transitive tree and is
-# what CI and the container image use.
+# what CI uses. Docker uses the smaller requirements.runtime.lock.txt.
 #
-#   pip install -r requirements.lock.txt   # reproducible (CI, Docker)
+#   pip install -r requirements.lock.txt   # reproducible local development and CI
 #   pip install -r requirements.txt        # loose, for local upgrades
 #
 # To refresh the lock after changing this file:
@@ -35,8 +35,9 @@ datasets>=2.20.0,<6.0
 # PDF generation
 fpdf2>=2.8.0,<3.0
 
-# UI
-streamlit>=1.40.0,<2.0
+# Same-origin web UI and streaming API
+starlette>=1.7.0,<2.0
+uvicorn>=0.53.0,<1.0
 
 # Ingestion
 pypdf>=6.16.1,<8.0           # PDF text extraction (ISSN papers, dietary guidelines)

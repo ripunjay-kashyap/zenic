@@ -5,6 +5,7 @@ Use --save and --compare flags to A/B test retrieval changes.
 import argparse
 import json
 
+from zenic.config import get_settings
 from zenic.rag.pipeline import generate_multi_queries, hybrid_search, rerank
 
 
@@ -16,8 +17,9 @@ def spot_check(query: str, verbose: bool = True) -> dict:
     for v in variants:
         print(f"    - {v}")
 
-    candidates = hybrid_search(variants, top_k=20)
-    print("\n[2] HYBRID SEARCH — TOP 20:")
+    pool = get_settings().retrieval_candidate_pool
+    candidates = hybrid_search(variants, top_k=pool)
+    print(f"\n[2] HYBRID SEARCH — TOP {pool}:")
     for i, c in enumerate(candidates, 1):
         snippet = c["text"][:120].replace("\n", " ")
         print(f"  {i:>2}. [vec={c.get('vector_score', 0):.3f} bm25={c.get('bm25_score', 0):.3f}] "

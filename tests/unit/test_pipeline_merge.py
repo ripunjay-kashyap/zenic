@@ -192,6 +192,39 @@ def test_rerank_uses_small_batches(monkeypatch):
     assert fake.batch_sizes == [pipeline.get_settings().rerank_batch_size]
 
 
+def test_rerank_includes_document_title_for_contextless_table(monkeypatch):
+    fake = _FakeReranker({"Vitamin D - Health Professional\n>70 years | 20 mcg (800 IU)": 0.9})
+    monkeypatch.setattr(pipeline, "_reranker_instance", lambda: fake)
+    candidate = {"text": ">70 years | 20 mcg (800 IU)",
+                 "metadata": {"source": "NIH_ODS", "nutrient_name": "Vitamin D - Health Professional"}}
+    assert pipeline.rerank("Vitamin D intake for >70?", [candidate])[0]["rerank_score"] == 0.9
+
+
+def test_age_table_reranking_focuses_current_age_without_changing_evidence():
+    text = "Age | Male | Female\n19–50 years | 15 mcg (600 IU) | 15 mcg (600 IU)\n" \
+           "51–70 years | 15 mcg (600 IU) | 15 mcg (600 IU)\n" \
+           ">70 years | 20 mcg (800 IU) | 20 mcg (800 IU)"
+    candidate = {"text": text, "metadata": {"nutrient_name": "Vitamin D - Health Professional"}}
+    focused = pipeline._rerank_passage("Vitamin D intake for adults older than 70", candidate)
+    assert ">70 years | 20 mcg" in focused
+    assert "19–50 years" not in focused
+    assert candidate["text"] == text
+    assert pipeline._age_table_rows("Vitamin D upper limit for adults older than 70", candidate) == []
+
+
+def test_recommended_intake_prefers_matching_age_table_over_ul_summary(monkeypatch):
+    table = {"text": "Age | Male | Female\n>70 years | 20 mcg (800 IU) | 20 mcg (800 IU)",
+             "metadata": {"nutrient_name": "Vitamin D - Health Professional"}}
+    upper_limit = {"text": "Vitamin D Tolerable Upper Intake Level: 4,000 IU",
+                   "metadata": {"note": "synthetic UL summary"}}
+    monkeypatch.setattr(pipeline, "_reranker_instance", lambda: object())
+    monkeypatch.setattr(pipeline, "_rerank_scores", lambda _model, pairs: [0.2] * len(pairs))
+    result = pipeline.rerank("Recommended vitamin D intake for adults older than 70?",
+                             [upper_limit, table])
+    assert result == [table]
+    assert table["rerank_score"] == 0.75
+
+
 def test_empty_query_short_circuits(monkeypatch):
     monkeypatch.setattr(
         pipeline, "hybrid_search", lambda *a, **k: pytest.fail("should not search")

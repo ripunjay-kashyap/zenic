@@ -14,6 +14,7 @@ import json
 import re
 import threading
 import time
+from urllib.parse import urlparse
 
 from rank_bm25 import BM25Okapi
 from sentence_transformers import CrossEncoder, SentenceTransformer
@@ -32,8 +33,8 @@ _bm25_index: BM25Okapi | None = None
 _bm25_corpus: list[dict] | None = None
 _bm25_load_attempted = False
 
-# Streamlit serves each session on its own thread; without these locks two
-# concurrent first-requests would each load a copy of the models into memory.
+# The web API serves sessions on worker threads; without these locks two
+# concurrent first requests would each load a copy of the models into memory.
 _embed_lock = threading.Lock()
 _rerank_lock = threading.Lock()
 _bm25_lock = threading.Lock()
@@ -114,8 +115,8 @@ def _try_load_bm25_from_disk() -> None:
     """Load the BM25 index from the persisted corpus, at most once per process.
 
     The path is resolved from the project root rather than the working
-    directory, so the index loads whether the app is started from the repo root,
-    from ``zenic/ui``, or from the container's ``/home/user/app``.
+    directory, so the index loads whether the app starts from the repo root
+    or from the container's ``/home/user/app``.
     """
     global _bm25_load_attempted
     if _bm25_index is not None or _bm25_load_attempted:
@@ -345,7 +346,8 @@ def _apply_source_diversity(ranked: list[dict], top_k: int, max_per_source: int)
 # values, flooding the top slots.
 _BOILERPLATE = re.compile(
     r"^(Recommended Intakes\s+Intake recommendations for [^\n]+ are provided in the "
-    r"Dietary Reference Intakes|Nutrient Intake Recommendations and Upper Limits)"
+    r"Dietary Reference Intakes|Nutrient Intake Recommendations and Upper Limits|"
+    r"Disclaimer\s+This fact sheet by the National Institutes of Health)"
 )
 
 
@@ -390,16 +392,77 @@ def _rerank_scores(reranker: CrossEncoder, pairs: list[tuple[str, str]]) -> list
     return scores
 
 
+def _age_table_rows(query: str, chunk: dict) -> list[str]:
+    """Keep only matching age rows for reranking; generation sees the full table."""
+    text = chunk.get("text", "")
+    title = _evidence_title(chunk).split(" - ", 1)[0]
+    if "Age |" not in text[:100] or not title or title.casefold() not in query.casefold():
+        return []
+    if re.search(r"\b(?:upper limit|tolerable|\bUL\b)\b", query, re.I):
+        return []
+    older = re.search(r"\b(?:older than|over)\s+(\d{1,3})\b", query, re.I)
+    span = re.search(r"\b(?:aged?|ages?)\s+(\d{1,3})\s*(?:to|[-–])\s*(\d{1,3})\b", query, re.I)
+    if older:
+        requested = (int(older[1]) + 1, 150)
+    elif span:
+        requested = (int(span[1]), int(span[2]))
+    else:
+        return []
+    rows = []
+    for line in text.splitlines():
+        label = line.split("|", 1)[0].strip()
+        above = re.fullmatch(r">\s*(\d{1,3})\s*years?", label, re.I)
+        interval = re.fullmatch(r"(\d{1,3})\s*[-–]\s*(\d{1,3})\s*years?", label, re.I)
+        if above:
+            row_range = (int(above[1]) + 1, 150)
+        elif interval:
+            row_range = (int(interval[1]), int(interval[2]))
+        else:
+            continue
+        if row_range[0] <= requested[1] and requested[0] <= row_range[1]:
+            rows.append(line)
+    return rows
+
+
+def _rerank_passage(query: str, chunk: dict) -> str:
+    title = _evidence_title(chunk)
+    focused_rows = _age_table_rows(query, chunk)
+    passage = "Age | Male | Female | Pregnancy | Lactation\n" + "\n".join(focused_rows) if focused_rows else chunk["text"]
+    return f"{title}\n{passage}" if title else passage
+
+
+def _asks_recommended_intake(query: str) -> bool:
+    return bool(
+        re.search(r"\b(?:recommend\w*|RDA|intake)\b", query, re.I)
+        and not re.search(r"\b(?:upper limit|tolerable|UL)\b", query, re.I)
+    )
+
+
+def _ul_only_summary(chunk: dict) -> bool:
+    metadata = chunk.get("metadata") or {}
+    return "synthetic UL summary" in str(metadata.get("note", ""))
+
+
 def rerank(query: str, candidates: list[dict], top_k: int | None = None) -> list[dict]:
     """Cross-encoder reranking — precision pass after recall-optimised retrieval."""
     top_k = get_settings().retrieval_top_k if top_k is None else top_k
+    if _asks_recommended_intake(query):
+        # An upper safety limit is not a recommended daily intake. The bundled
+        # synthetic UL summary scores highly even for RDA questions, so it must
+        # not crowd out the actual NIH recommended-intake table.
+        candidates = [c for c in candidates if not _ul_only_summary(c)]
     if not candidates:
         return []
 
     started = time.perf_counter()
     reranker = _reranker_instance()
-    scores = _rerank_scores(reranker, [(query, c["text"]) for c in candidates])
+    scores = _rerank_scores(reranker, [(query, _rerank_passage(query, c)) for c in candidates])
     for candidate, score in zip(candidates, scores, strict=True):
+        # The cross encoder under-scores compact numeric tables that omit their
+        # heading. A matching publisher title and exact age row provide stronger
+        # structural evidence for an intake lookup than that text score alone.
+        if _asks_recommended_intake(query) and _age_table_rows(query, candidate):
+            score = max(score, 0.75)
         candidate["rerank_score"] = score
     candidates.sort(key=lambda c: c["rerank_score"], reverse=True)
 
@@ -479,6 +542,11 @@ _RAG_SYSTEM_PROMPT = (
     "If the context says 'Perform 3 sets' and you know '5 sets' is better, you MUST say '3 sets.' "
     "If the information is missing, state 'The provided documentation does not contain this information.' "
     "No conversational filler. No creative extrapolation. "
+    "When the question specifies an age group, population, or nutrient quantity, use the "
+    "most specific matching passage or table row. A broad summary range must not replace a "
+    "more specific value. Distinguish recommended intake from an upper intake limit; never "
+    "treat them as interchangeable. If sources conflict, explain the difference instead of "
+    "blending their numbers. "
     "Cite each factual claim with its evidence ID, such as [1]. Use only IDs supplied below. "
     "Use individual bracketed numeric citations [1] [2], not ranges. "
     "Do not invent dates, sources, URLs, or bibliographic details. "
@@ -487,6 +555,41 @@ _RAG_SYSTEM_PROMPT = (
 
 #: Prior turns fed back to the model in general chat. Two turns per exchange.
 _HISTORY_TURNS = 6
+
+
+def _evidence_url(chunk: dict) -> str | None:
+    """Return only a source URL on the known publisher's HTTPS host."""
+    metadata = chunk.get("metadata") or {}
+    url = metadata.get("url")
+    if not isinstance(url, str) or len(url) > 500 or re.search(r"[\x00-\x20]", url):
+        return None
+    try:
+        parsed = urlparse(url)
+        allowed_hosts = {"NIH_ODS": "ods.od.nih.gov"}
+        if parsed.scheme != "https" or parsed.hostname != allowed_hosts.get(metadata.get("source")):
+            return None
+        if (parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment
+                or not parsed.path.startswith("/factsheets/")):
+            return None
+    except ValueError:
+        return None
+    return url
+
+
+def _plain_label(value: object, limit: int) -> str:
+    return re.sub(r"[\x00-\x1f\x7f]+", " ", str(value)).strip()[:limit]
+
+
+def _evidence_title(chunk: dict) -> str:
+    metadata = chunk.get("metadata") or {}
+    return _plain_label(metadata.get("nutrient_name") or metadata.get("source_title") or "", 120)
+
+
+def _source_line(index: int, chunk: dict) -> str:
+    source = _plain_label((chunk.get("metadata") or {}).get("source", "Unknown"), 100)
+    title = _evidence_title(chunk)
+    url = _evidence_url(chunk)
+    return f"[{index}] {source}{': ' + title if title else ''}{' — ' + url if url else ''}"
 
 
 def generate(
@@ -527,8 +630,8 @@ def generate(
         if not cited or not cited.issubset(set(range(1, len(context_chunks) + 1))):
             return NO_EVIDENCE_RESPONSE
         sources = "\n".join(
-            f"[{i}] {str((c.get('metadata') or {}).get('source', 'Unknown'))[:100]}"
-            for i, c in enumerate(context_chunks, 1) if i in cited
+            _source_line(i, chunk)
+            for i, chunk in enumerate(context_chunks, 1) if i in cited
         )
         answer += "\n\nSources:\n" + sources
     return answer + "\n\nGeneral information only; not a diagnosis or personalized medical advice."
@@ -570,7 +673,8 @@ def _build_generation_messages(
 
     # --- RAG intents: strict Clinical Data Retrieval ---
     context_text = json.dumps([
-        {"id": i, "source": str((c.get("metadata") or {}).get("source", "Unknown"))[:100],
+        {"id": i, "source": _plain_label((c.get("metadata") or {}).get("source", "Unknown"), 100),
+         "title": _evidence_title(c), "url": _evidence_url(c),
          "year": str((c.get("metadata") or {}).get("year", ""))[:20], "passage": c["text"]}
         for i, c in enumerate(evidence_chunks(context_chunks), 1)
     ], ensure_ascii=False)

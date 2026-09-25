@@ -153,6 +153,7 @@ def initial_state(
         "missing_fields": pending_missing_fields or [],
         "awaiting_input": bool(pending_intent),
         "retrieved_context": [],
+        "retrieval_query": "",
         "tool_results": {},
         "plan_data": {},
         "safety_flag": False,

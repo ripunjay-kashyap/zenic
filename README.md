@@ -1,30 +1,25 @@
----
-title: Zenic
-emoji: 🥗
-colorFrom: green
-colorTo: blue
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Zenic — Health & Nutrition RAG Assistant
 
 An evidence-focused nutrition and fitness assistant built with Python, LangGraph,
-Streamlit, hybrid retrieval, and Groq. It combines a curated knowledge base with
-deterministic calculators and downloadable educational plans.
+a lightweight HTML/CSS/JavaScript frontend, a same-origin Starlette API, hybrid
+retrieval, and Groq. It combines a curated knowledge base with deterministic
+calculators and downloadable educational plans.
 
 ![Zenic interface](assets/ui_landing.png)
 
-**Validation:** the offline suite, live Qdrant/Groq workflows, and container checks
-are recorded in [the release audit](docs/release-audit.md). This is an educational
+[See the cited answer view](assets/ui_chat.png).
+
+**Validation:** the original hardening is recorded in [the release audit](docs/release-audit.md),
+and the browser migration and measured latency in [the web demo audit](docs/web-demo-audit.md).
+This is an educational
 portfolio application, not a medical device or a service for clinical decisions.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    UI[Streamlit session] --> Safety[Input bounds and safety filter]
+    UI[Browser UI] --> API[Streaming web API]
+    API --> Safety[Input bounds and safety filter]
     Safety --> Router[Intent router]
     Router --> RAG[Nutrition and exercise Q&A]
     RAG --> Expand[Query expansion]
@@ -45,13 +40,15 @@ flowchart LR
   in their metadata; their provenance scripts remain in `scripts/oneoff/`.
 - **Retrieval:** BGE-small embeddings, local Chroma or production Qdrant, BM25,
   reciprocal rank fusion, fair candidate allocation per source, deduplication by chunk identity, and BGE cross encoder
-  reranking. Query embeddings are batched; models and clients are reused.
+  reranking. Query embeddings are batched; models and clients are reused. Age-specific
+  nutrient intake lookups focus the matching table row during reranking.
 - **Grounding:** only passages scoring at least 0.5 enter factual generation.
   Whole passages fit within a 16,000-character budget. Missing evidence produces
   a static abstention. Live USDA fallback results are reranked too.
 - **Citations:** evidence IDs such as `[1]` map to supplied source records.
   Missing or out-of-range IDs cause abstention. This checks citation structure,
-  not whether every claim is semantically entailed by its cited passage.
+  not whether every claim is semantically entailed by its cited passage. NIH ODS
+  citations link to their validated publisher URLs.
 - **Orchestration:** six intents: nutrition Q&A, calculations, meal plans,
   workout plans, demonstration weekly summaries, and general conversation.
   Unknown router outputs require retrieval rather than unrestricted health chat.
@@ -62,6 +59,10 @@ flowchart LR
   inappropriate formula.
 - **Resilience:** timeouts, bounded retries, safe errors, structured logs with
   correlation IDs, and no health query or profile values in application logs.
+- **Interface:** a responsive, dependency-free browser UI. The API streams stage
+  updates while LangGraph runs, keeps conversations in short-lived server-side
+  sessions, and restricts PDF downloads to the session that created them.
+  Referential health follow-ups are rewritten into standalone retrieval questions.
 
 The candidate merge uses reciprocal rank fusion so raw BM25 scores cannot overwhelm
 vector similarities. Each source receives a share of the candidate budget before
@@ -93,15 +94,16 @@ Build a local vector index from the same corpus before starting:
 ```bash
 ENV=development PYTHONPATH=. python scripts/index_corpus.py
 PYTHONPATH=. python scripts/healthcheck.py --llm
-streamlit run zenic/ui/app.py --server.fileWatcherType none
+PYTHONPATH=. uvicorn zenic.web.app:app --host 127.0.0.1 --port 7860
 ```
 
 Embedding and reranking models download on first use. Once cached, set
-`HF_HUB_OFFLINE=1` to avoid Hub probes. Disabling Streamlit's file watcher
-avoids repeated scans of Transformers modules; restart the app after code edits.
-CPU reranking can take tens of seconds. `MULTI_QUERY_ENABLED=false` avoids
-query-expansion model calls when latency or provider budget matters. It can
-reduce recall.
+`HF_HUB_OFFLINE=1` to avoid Hub probes.
+
+Open <http://127.0.0.1:7860>. The production vector store requires `ENV=production`
+and a populated Qdrant collection. The browser UI shows each graph stage and
+the completed turn time. CPU reranking can still take tens of seconds;
+`MULTI_QUERY_ENABLED=false` avoids query-expansion calls at a possible recall cost.
 
 ## Configuration
 
@@ -117,13 +119,17 @@ See [.env.example](.env.example) for all defaults and supported tuning knobs.
 | `GOOGLE_API_KEY` | Optional historical RAGAS evaluation |
 | `CHROMA_PATH`, `BM25_CORPUS_PATH` | Local persistence locations |
 | `MULTI_QUERY_ENABLED` | Enable query expansion, default true |
+| `RETRIEVAL_CANDIDATE_POOL` | Passages reranked per turn, default 12 |
 | `RETRIEVAL_TOP_K` | Final passages, default 7 |
 | `RERANK_BATCH_SIZE` | Small length-sorted batches, default 4 |
 | `LOG_FORMAT`, `LOG_LEVEL` | Structured or text diagnostics |
 
-The UI keeps chat and profile state per Streamlit session. Prompts and relevant
-profile fields are sent to the configured model provider; food fallback queries
-are sent to USDA. Do not enter identifying or sensitive medical information.
+The server keeps chat and profile state in memory for up to 30 minutes, keyed by
+an HTTP-only, same-site cookie. It accepts at most two active graph turns per
+process to protect the CPU demo from overload. It does not persist conversations across server
+restarts. Prompts and relevant profile fields are sent to the configured model
+provider; food fallback queries are sent to USDA. Do not enter identifying or
+sensitive medical information.
 Weekly summaries use bundled **synthetic demonstration data**, not user tracking.
 
 ## Tests and evaluation
@@ -137,9 +143,9 @@ PYTHONPATH=. python scripts/ragas_eval.py
 ```
 
 Offline tests cover retrieval merging, reranking, grounding, citation rejection,
-configuration, HTTP failure handling, profiles, calculators, graph routing, PDF
-rendering, and safety boundaries. They replace external services; they do not
-establish live service health or clinical accuracy.
+configuration, HTTP failure handling, profiles, calculators, graph routing, web
+sessions, PDF access, and safety boundaries. They replace external services;
+they do not establish live service health or clinical accuracy.
 
 `eval_results/ragas_latest.json` contains a **historical** evaluation using the
 previous model and prompts. It is retained for reproducibility, not advertised
@@ -158,22 +164,22 @@ docker run --rm --env-file .env -p 7860:7860 zenic
 ```
 
 The image runs as a non-root user, excludes local secrets and raw documents,
-installs pinned dependencies, and preloads embedding models. Its HTTP healthcheck
-checks Streamlit liveness; `scripts/healthcheck.py --llm` checks service readiness.
-The same Dockerfile supports Hugging Face Docker Spaces on port 7860.
+installs only pinned production dependencies, and preloads embedding models.
+The development and evaluation packages remain in the full lock. Its HTTP healthcheck
+checks web server configuration; `scripts/healthcheck.py --llm` checks service readiness.
 
 **Before internet exposure:** deploy behind authenticated access with request and
 concurrency limits, TLS, provider spending limits, and a retention policy. This
 repository does not implement account authentication or a distributed rate limiter.
-Keep Streamlit's default CORS and XSRF protections enabled. Do not expose a Chroma
-server; the development backend uses an embedded database only.
+Keep the browser and API on the same origin. Do not expose a Chroma server; the
+development backend uses an embedded database only.
 
 ## Repository map
 
 - `zenic/rag/`: retrieval, generation, vector adapters, and ingestion
 - `zenic/agent/`: graph, nodes, profile validation, and deterministic tools
 - `zenic/safety/`: keyword filter and standalone OpenFDA research utility
-- `zenic/ui/`: Streamlit interface
+- `zenic/web/`: browser UI and streaming API
 - `tests/`: offline regression and opt-in live integration checks
 - `scripts/`: corpus indexing, ingestion, migration, health and evaluation tools
 - `data/`: curated corpus and synthetic demonstration data

@@ -20,6 +20,7 @@ class ZenicState(TypedDict):
 
     # Retrieval
     retrieved_context: list  # list of chunks with source metadata
+    retrieval_query: str  # standalone wording for referential follow-ups
 
     # Calculation and tool results
     tool_results: dict  # bmr, tdee, macros, protein_range, split_type, exercises, weekly_stats, etc.

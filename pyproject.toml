@@ -8,10 +8,13 @@ version = "1.0.0"
 description = "Health and nutrition AI assistant: advanced RAG, agentic orchestration, and evaluation."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
 
 [tool.setuptools.packages.find]
 include = ["zenic*"]
+
+[tool.setuptools.package-data]
+"zenic.web" = ["static/*"]
 
 # ---------------------------------------------------------------------------
 # Tests
@@ -31,7 +34,6 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["zenic"]
-omit = ["zenic/ui/*"]
 
 [tool.coverage.report]
 show_missing = true
@@ -83,7 +85,6 @@ ignore = [
 # One-off dev/probe scripts: printing is their output, and several must set
 # environment variables before importing zenic, so imports cannot come first.
 "scripts/*" = ["T20", "E402", "SIM115"]
-"zenic/ui/*" = ["E402"]  # st.set_page_config must run before the agent imports
 "tests/*" = ["T20", "E402"]
 
 [tool.ruff.lint.isort]

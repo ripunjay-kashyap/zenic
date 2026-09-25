@@ -3,7 +3,7 @@
 Before this module existed, five nodes each constructed their own ``Groq()``
 client per invocation with no timeout, no retry policy, and no error handling —
 so a transient 503 from the provider surfaced as an unhandled exception in the
-Streamlit UI. Everything now goes through :func:`chat_completion`, which owns:
+browser UI. Everything now goes through :func:`chat_completion`, which owns:
 
   * one shared, lazily-built client (connection pooling, thread-safe)
   * a bounded timeout and provider-level retries with exponential backoff
