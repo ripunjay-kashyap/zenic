@@ -1,5 +1,5 @@
 """
-Faithfulness spot-check — Pillar 1 manual evaluation.
+Faithfulness spot-check for manual evaluation.
 
 Runs 5 representative queries through the RAG pipeline (retrieve + generate)
 and prints the retrieved context alongside the generated answer so you can
@@ -132,7 +132,7 @@ def run_case(case: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Faithfulness spot-check — Pillar 1")
+    parser = argparse.ArgumentParser(description="Faithfulness spot-check")
     parser.add_argument("--skip", metavar="IDs", default="",
                         help="Comma-separated case IDs to skip (e.g. --skip f1)")
     parser.add_argument("--only", metavar="IDs", default="",
@@ -155,7 +155,7 @@ def main() -> None:
         and (not only_ids or c["id"] in only_ids)
     ]
 
-    print("\nZenic Faithfulness Spot-Check — Pillar 1")
+    print("\nZenic Faithfulness Spot-Check")
     print("Run the checks below and tick each box.\n")
     print("PASS criteria: all boxes ticked for all cases.")
     print("FAIL criteria: any number is fabricated, any source is invented,")

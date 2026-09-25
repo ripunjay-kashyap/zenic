@@ -9,10 +9,9 @@ calculators and downloadable educational plans.
 
 [See the cited answer view](assets/ui_chat.png).
 
-**Validation:** the original hardening is recorded in [the release audit](docs/release-audit.md),
-and the browser migration and measured latency in [the web demo audit](docs/web-demo-audit.md).
-This is an educational
-portfolio application, not a medical device or a service for clinical decisions.
+This is an educational portfolio application, not a medical device or a service
+for clinical decisions. See [Tests and evaluation](#tests-and-evaluation) for the
+current validation scope and limits.
 
 ## Architecture
 
@@ -37,7 +36,7 @@ flowchart LR
 
 - **Knowledge:** 10,201 bundled passages from NIH ODS, USDA, wger, dietary
   guidelines, and ISSN. Three manually authored summaries are explicitly marked
-  in their metadata; their provenance scripts remain in `scripts/oneoff/`.
+  in their corpus metadata.
 - **Retrieval:** BGE-small embeddings, local Chroma or production Qdrant, BM25,
   reciprocal rank fusion, fair candidate allocation per source, deduplication by chunk identity, and BGE cross encoder
   reranking. Query embeddings are batched; models and clients are reused. Age-specific
@@ -116,7 +115,7 @@ See [.env.example](.env.example) for all defaults and supported tuning knobs.
 | `ENV` | `development` uses Chroma; `production` uses Qdrant |
 | `QDRANT_URL`, `QDRANT_API_KEY` | Required in production; HTTPS only |
 | `USDA_API_KEY` | Optional food-data fallback |
-| `GOOGLE_API_KEY` | Optional historical RAGAS evaluation |
+| `GOOGLE_API_KEY` | Optional RAGAS evaluation |
 | `CHROMA_PATH`, `BM25_CORPUS_PATH` | Local persistence locations |
 | `MULTI_QUERY_ENABLED` | Enable query expansion, default true |
 | `RETRIEVAL_CANDIDATE_POOL` | Passages reranked per turn, default 12 |
@@ -147,10 +146,12 @@ configuration, HTTP failure handling, profiles, calculators, graph routing, web
 sessions, PDF access, and safety boundaries. They replace external services;
 they do not establish live service health or clinical accuracy.
 
-`eval_results/ragas_latest.json` contains a **historical** evaluation using the
-previous model and prompts. It is retained for reproducibility, not advertised
-as a score for the current version. The small retrieval benchmark is also not a
-clinical validation dataset.
+The current release passed 246 offline tests, 10 live retrieval spot checks, and
+six live RAG-versus-API routing checks. Desktop and mobile browser flows and the
+production container were also smoke-tested. These are functional checks; the
+small retrieval benchmark is not a clinical validation dataset. Evaluation
+output is generated locally and is not committed because scores depend on the
+model, prompts, index, and provider state at run time.
 
 ## Deployment
 
@@ -183,6 +184,6 @@ development backend uses an embedded database only.
 - `tests/`: offline regression and opt-in live integration checks
 - `scripts/`: corpus indexing, ingestion, migration, health and evaluation tools
 - `data/`: curated corpus and synthetic demonstration data
-- `docs/release-audit.md`: validation evidence and remaining release blockers
+- `eval_data/`: reproducible retrieval evaluation questions
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).

@@ -2,7 +2,7 @@
 .env
 .env.*
 !.env.example
-.streamlit/secrets.toml
+.streamlit/
 
 # ─── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
@@ -41,8 +41,7 @@ data/*
 chroma_db/
 
 # ─── Evaluation output ────────────────────────────────────────────────────────
-eval_results/*
-!eval_results/ragas_latest.json
+eval_results/
 ragas_results/
 *.ragas.json
 baseline_*.json
@@ -62,10 +61,8 @@ page-*.png
 tmp_*.txt
 scripts/test_output.txt
 
-# One-off provider/SDK probes. The rest of scripts/oneoff/ is tracked — see
-# scripts/oneoff/README.md for why.
-scripts/oneoff/test_*.py
-scripts/oneoff/debug_*.py
+# One-off local probes
+scripts/oneoff/
 
 # ─── Notebooks ────────────────────────────────────────────────────────────────
 .ipynb_checkpoints/

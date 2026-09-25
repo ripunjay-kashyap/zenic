@@ -56,7 +56,7 @@ htmlcov/
 
 .agents/
 .codex/
-.streamlit/secrets.toml
+.streamlit/
 CLAUDE.md
 data/*
 !data/bm25_corpus.json

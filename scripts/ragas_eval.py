@@ -1,15 +1,15 @@
 """
-RAGAS automated evaluation — Pillar 3.
+RAGAS automated evaluation.
 
 Runs spot-check queries through the RAG pipeline (retrieve + generate) and
-scores the results with RAGAS using Gemini 2.0 Flash as the judge LLM.
+scores the results with RAGAS using Gemma 4 as the judge LLM.
 
 Metrics
 -------
   faithfulness      — is the answer grounded in the retrieved context?
   context_precision — are the retrieved chunks relevant to the question?
 
-Historical targets: faithfulness > 0.85, context_precision > 0.75
+Evaluation targets: faithfulness > 0.85, context_precision > 0.75
 
 Usage
 -----
@@ -19,10 +19,8 @@ Usage
 
 Requires: GROQ_API_KEY + GOOGLE_API_KEY in .env, populated vector DB + BM25 corpus.
 
-Token budget (Groq free tier 100k TPD)
----------------------------------------
-  9 cases × ~3k tokens each ≈ 27k tokens with --no-multi-query
-  9 cases × ~9k tokens each ≈ 81k tokens without --no-multi-query
+All evaluation cases run by default. Use --skip only for an explicitly scoped
+investigation; excluded IDs are printed and saved with the result.
 """
 import argparse
 import json
@@ -46,18 +44,6 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 _EVAL_DATA_PATH = Path("eval_data/pillar1_spot_check.json")
-
-# Cases to skip by default (known data gaps / judge bugs — not pipeline defects).
-_DEFAULT_SKIP = {
-    "p1_001",   # USDA data gap (deli chicken, not plain cooked); API fallback validated by rag_vs_api_check.py
-    "p1_002",   # USDA data gap (raw spinach absent from corpus); API fallback validated
-    "p1_005",   # needs multi-query for wger barbell chunk; skip in --no-multi-query runs
-    "p1_008",   # Gemma 4 judge parsing bug on calcium tables; retrieval is correct
-    "p1_010",   # USDA data gap (banana per-100g vs medium-banana inference)
-    "p1_012",   # trick question — LLM uses parametric knowledge for molecular color;
-                # needs rerank_score threshold guard in _all_low_quality() (Tier 3 future work)
-}
-
 
 def _load_cases(skip_ids: set[str], only_ids: set[str]) -> list[dict]:
     cases = json.loads(_EVAL_DATA_PATH.read_text(encoding="utf-8"))
@@ -147,7 +133,7 @@ def _build_embeddings():
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="RAGAS automated eval — Pillar 3")
+    parser = argparse.ArgumentParser(description="RAGAS automated evaluation")
     parser.add_argument("--skip", metavar="IDs", default="",
                         help="Comma-separated case IDs to skip (e.g. --skip p1_001,p1_002)")
     parser.add_argument("--only", metavar="IDs", default="",
@@ -158,16 +144,14 @@ def main() -> None:
 
     only_ids = {s.strip() for s in args.only.split(",") if s.strip()}
     skip_ids = {s.strip() for s in args.skip.split(",") if s.strip()}
-    if not only_ids:
-        skip_ids |= _DEFAULT_SKIP
     multi_query = not args.no_multi_query
 
     cases = _load_cases(skip_ids, only_ids)
     if not cases:
         print("No cases to run after applying --skip / --only filters.")
-        return
+        raise SystemExit(1)
 
-    print("\nZenic RAGAS Eval — Pillar 3")
+    print("\nZenic RAGAS Evaluation")
     print("Judge LLM : gemma-4-31b-it/thinking_budget=0 (GOOGLE_API_KEY)")
     print("Metrics   : faithfulness (target >0.85), context_precision/no-ref (target >0.75)")
     print(f"Cases     : {len(cases)}")
@@ -179,6 +163,8 @@ def main() -> None:
 
     # --- Step 1: collect pipeline outputs ----------------------------------
     rows = {"question": [], "answer": [], "contexts": []}
+    run_ids: list[str] = []
+    failed_ids: list[str] = []
 
     for case in cases:
         print(f"\n[{case['id']}] {case['query']}")
@@ -186,6 +172,7 @@ def main() -> None:
             row = _run_case(case, multi_query=multi_query)
         except Exception as exc:
             print(f"  ERROR: {exc}")
+            failed_ids.append(case["id"])
             continue
 
         print(f"  Answer   : {row['answer'][:120].replace(chr(10), ' ')}{'...' if len(row['answer']) > 120 else ''}")
@@ -193,10 +180,11 @@ def main() -> None:
         rows["question"].append(row["question"])
         rows["answer"].append(row["answer"])
         rows["contexts"].append(row["contexts"])
+        run_ids.append(case["id"])
 
     if not rows["question"]:
         print("\nNo rows collected — aborting RAGAS scoring.")
-        return
+        raise SystemExit(1)
 
     # --- Step 2: score with RAGAS -----------------------------------------
     print(f"\n{'=' * 72}")
@@ -232,7 +220,7 @@ def main() -> None:
     print("=" * 72)
 
     df = result.to_pandas()
-    # Aggregate: nanmean across cases (NaN where Gemini timed out)
+    # Show available averages, but incomplete scores cannot pass the evaluation.
     faith_key = "faithfulness"
     prec_key = next((c for c in df.columns if "context_precision" in c), None)
 
@@ -246,9 +234,21 @@ def main() -> None:
     print(f"  context_precision : {prec_score:.3f}  (target >0.75)  {prec_status}")
     print()
 
-    overall = faith_score >= 0.85 and prec_score >= 0.75
+    complete = (
+        not failed_ids
+        and len(df) == len(run_ids)
+        and faith_key in df.columns
+        and prec_key is not None
+        and bool(np.isfinite(df[faith_key].to_numpy(dtype=float)).all())
+        and bool(np.isfinite(df[prec_key].to_numpy(dtype=float)).all())
+    )
+    overall = complete and faith_score >= 0.85 and prec_score >= 0.75
+    if failed_ids:
+        print(f"Pipeline failures: {', '.join(failed_ids)}")
+    if not complete:
+        print("Some selected cases or judge scores are missing; evaluation cannot pass.")
     if overall:
-        print("OVERALL: PASS ✅  Pillar 3 RAGAS targets met.")
+        print("OVERALL: PASS ✅  RAGAS targets met for the scored cases.")
     else:
         print("OVERALL: FAIL ❌  One or more targets not met.")
 
@@ -256,7 +256,7 @@ def main() -> None:
     print("Per-case scores:")
     per_case = []
     for i, row in df.iterrows():
-        case_id = cases[i]["id"] if i < len(cases) else f"case_{i}"
+        case_id = run_ids[i] if i < len(run_ids) else f"case_{i}"
         f_val = row.get(faith_key, float("nan"))
         p_val = row.get(prec_key, float("nan")) if prec_key else float("nan")
         print(f"  [{case_id}]  faithfulness={f_val:.3f}  context_precision={p_val:.3f}")
@@ -276,6 +276,8 @@ def main() -> None:
         "judge": "gemma-4-31b-it",
         "mode": "single-query" if not multi_query else "multi-query",
         "skipped": sorted(skip_ids),
+        "failed": failed_ids,
+        "evaluated": run_ids,
         "averages": {
             "faithfulness": None if np.isnan(faith_score) else round(faith_score, 4),
             "context_precision": None if np.isnan(prec_score) else round(prec_score, 4),
@@ -286,6 +288,8 @@ def main() -> None:
     }
     json_path.write_text(json.dumps(json_payload, indent=2), encoding="utf-8")
     print(f"\nResults saved → {json_path}")
+    if not overall:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
